@@ -29,74 +29,82 @@ def _load_agent_config() -> dict[str, Any]:
 
 
 # ---------- Node functions ----------
+# LangGraph 的 state 是 dict，通过 state["key"] 访问
 
 
-def data_loader(state: AnalysisState) -> dict[str, Any]:
+def data_loader(state: dict[str, Any]) -> dict[str, Any]:
     """加载股票数据到State（入口节点）"""
-    logger.info(f"[DataLoader] Loading data for {state.stock.symbol if state.stock else 'N/A'}")
-    if state.stock is None:
+    stock = state.get("stock")
+    symbol = stock.symbol if stock else "N/A"
+    logger.info(f"[DataLoader] Loading data for {symbol}")
+    if stock is None:
         return {"errors": ["No stock data provided"]}
-
     return {"analysis_date": date.today().isoformat()}
 
 
-def technical_analyst(state: AnalysisState) -> dict[str, Any]:
+def technical_analyst(state: dict[str, Any]) -> dict[str, Any]:
     """技术面分析Agent"""
     from .analysts.technical import analyze_technical
 
-    logger.info(f"[TechnicalAnalyst] Analyzing {state.stock.symbol}")
+    stock = state["stock"]
+    logger.info(f"[TechnicalAnalyst] Analyzing {stock.symbol}")
     try:
-        signal = analyze_technical(state.stock)
+        signal = analyze_technical(stock)
         return {"signals": [signal]}
     except Exception as e:
         logger.error(f"[TechnicalAnalyst] Error: {e}")
         return {"errors": [f"TechnicalAnalyst error: {e}"]}
 
 
-def fundamental_analyst(state: AnalysisState) -> dict[str, Any]:
+def fundamental_analyst(state: dict[str, Any]) -> dict[str, Any]:
     """基本面分析Agent"""
     from .analysts.fundamental import analyze_fundamental
 
-    logger.info(f"[FundamentalAnalyst] Analyzing {state.stock.symbol}")
+    stock = state["stock"]
+    logger.info(f"[FundamentalAnalyst] Analyzing {stock.symbol}")
     try:
-        signal = analyze_fundamental(state.stock)
+        signal = analyze_fundamental(stock)
         return {"signals": [signal]}
     except Exception as e:
         logger.error(f"[FundamentalAnalyst] Error: {e}")
         return {"errors": [f"FundamentalAnalyst error: {e}"]}
 
 
-def valuation_analyst(state: AnalysisState) -> dict[str, Any]:
+def valuation_analyst(state: dict[str, Any]) -> dict[str, Any]:
     """估值分析Agent"""
     from .analysts.valuation import analyze_valuation
 
-    logger.info(f"[ValuationAnalyst] Analyzing {state.stock.symbol}")
+    stock = state["stock"]
+    logger.info(f"[ValuationAnalyst] Analyzing {stock.symbol}")
     try:
-        signal = analyze_valuation(state.stock)
+        signal = analyze_valuation(stock)
         return {"signals": [signal]}
     except Exception as e:
         logger.error(f"[ValuationAnalyst] Error: {e}")
         return {"errors": [f"ValuationAnalyst error: {e}"]}
 
 
-def fusion_agent(state: AnalysisState) -> dict[str, Any]:
+def fusion_agent(state: dict[str, Any]) -> dict[str, Any]:
     """决策融合Agent"""
     from .fusion.engine import fuse_signals
 
-    logger.info(f"[FusionAgent] Fusing {len(state.signals)} signals")
+    signals = state.get("signals", [])
+    stock = state.get("stock")
+    logger.info(f"[FusionAgent] Fusing {len(signals)} signals")
     try:
-        decision = fuse_signals(state.signals, state.stock)
+        decision = fuse_signals(signals, stock)
         return {"fusion": decision}
     except Exception as e:
         logger.error(f"[FusionAgent] Error: {e}")
         return {"errors": [f"FusionAgent error: {e}"]}
 
 
-def report_agent(state: AnalysisState) -> dict[str, Any]:
+def report_agent(state: dict[str, Any]) -> dict[str, Any]:
     """研报生成Agent"""
     from ..report.generator import generate_report
 
-    logger.info(f"[ReportAgent] Generating report for {state.stock.symbol}")
+    stock = state.get("stock")
+    logger.info(f"[ReportAgent] Generating report for {stock.symbol if stock else 'N/A'}")
     try:
         report = generate_report(state)
         return {"report": report}
@@ -140,14 +148,12 @@ def build_analysis_graph() -> StateGraph:
     graph.set_entry_point("data_loader")
 
     # DataLoader → 并行分析（fan-out）
-    # 根据配置决定启用哪些Agent
     enabled_analysts = []
     for name in ["technical", "fundamental", "valuation"]:
         agent_cfg = config.get(name, {})
         if agent_cfg.get("enabled", True):
             enabled_analysts.append(name)
 
-    # DataLoader 连接到所有启用的分析Agent
     for analyst in enabled_analysts:
         graph.add_edge("data_loader", analyst)
 

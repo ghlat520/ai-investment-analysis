@@ -2,18 +2,14 @@
 LangGraph 共享状态定义
 
 所有Agent通过State读写数据，实现解耦协作。
-State是LangGraph图的核心数据结构，贯穿整个分析流程。
+LangGraph的State本质是TypedDict，node函数通过dict方式访问。
 """
 
 from __future__ import annotations
 
-import operator
 from dataclasses import dataclass, field
-from datetime import date, datetime
 from typing import Annotated, Any, Optional
-from uuid import UUID, uuid4
-
-from langgraph.graph import MessagesState
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -87,34 +83,30 @@ def _merge_errors(existing: list[str], new: list[str]) -> list[str]:
     return existing + new
 
 
-class AnalysisState(MessagesState):
+from typing import TypedDict
+
+
+class AnalysisState(TypedDict, total=False):
     """LangGraph 分析流程的共享状态
 
-    所有Agent节点读写此State，通过LangGraph的reducer机制
-    自动合并并发写入。
+    LangGraph中State是TypedDict，node函数通过 state["key"] 访问。
+    使用Annotated标注reducer，实现并发写入的自动合并。
     """
 
-    # 运行标识
-    run_id: UUID = field(default_factory=uuid4)
-    analysis_date: str = ""  # YYYY-MM-DD
-
     # 输入：待分析的股票数据
-    stock: Optional[StockData] = None
+    stock: StockData
+
+    # 运行标识
+    analysis_date: str  # YYYY-MM-DD
 
     # 各Agent产出的信号（通过reducer自动追加）
-    signals: Annotated[list[AgentSignal], _merge_signals] = field(
-        default_factory=list
-    )
+    signals: Annotated[list[AgentSignal], _merge_signals]
 
     # 决策融合结果
-    fusion: Optional[FusionDecision] = None
+    fusion: FusionDecision
 
     # 研报内容
-    report: str = ""
+    report: str
 
     # 错误收集
-    errors: Annotated[list[str], _merge_errors] = field(default_factory=list)
-
-    # 元数据
-    total_llm_cost_usd: float = 0.0
-    total_tokens_used: int = 0
+    errors: Annotated[list[str], _merge_errors]

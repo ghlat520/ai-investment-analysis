@@ -3,7 +3,7 @@ name = "ai-investment-analysis"
 version = "0.1.0"
 description = "全维度多Agent协作的AI投研助手系统"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = { text = "MIT" }
 
 dependencies = [
@@ -75,6 +75,9 @@ web = [
 
 [project.scripts]
 ai-invest = "src.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src", "config"]
 
 [build-system]
 requires = ["hatchling"]

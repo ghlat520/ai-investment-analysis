@@ -9,12 +9,9 @@ Phase 3: HTML/PDF
 from __future__ import annotations
 
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import Any
 
 from loguru import logger
-
-if TYPE_CHECKING:
-    from src.agents.state import AnalysisState
 
 
 def _action_to_stars(score: int) -> str:
@@ -34,11 +31,15 @@ def _action_to_stars(score: int) -> str:
     return "★（强烈看空）"
 
 
-def generate_report(state: AnalysisState) -> str:
-    """生成Markdown研报"""
-    stock = state.stock
-    fusion = state.fusion
-    signals = state.signals
+def generate_report(state: dict[str, Any]) -> str:
+    """生成Markdown研报
+
+    state 是 LangGraph 的 TypedDict，通过 dict 方式访问。
+    """
+    stock = state.get("stock")
+    fusion = state.get("fusion")
+    signals = state.get("signals", [])
+    analysis_date = state.get("analysis_date", date.today().isoformat())
 
     if stock is None or fusion is None:
         return "# 分析失败\n\n无法生成报告：缺少股票数据或融合决策。"
@@ -51,7 +52,7 @@ def generate_report(state: AnalysisState) -> str:
     lines = [
         f"# {name}({symbol}) 投研分析报告",
         "",
-        f"**分析日期**: {state.analysis_date or date.today().isoformat()}",
+        f"**分析日期**: {analysis_date}",
         "",
         f"## 综合评级: {rating}",
         "",
@@ -117,7 +118,7 @@ def generate_report(state: AnalysisState) -> str:
     lines.extend([
         "## 数据来源与时效性",
         "",
-        f"- 分析日期: {state.analysis_date or date.today().isoformat()}",
+        f"- 分析日期: {analysis_date}",
         f"- 分析Agent数: {len(signals)}",
         "- 本报告由AI投研助手系统自动生成，仅供参考",
         "",
