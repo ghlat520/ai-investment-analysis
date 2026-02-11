@@ -1,0 +1,50 @@
+# 信号权重配置
+# 根据市场环境动态选择权重方案
+
+market_regimes:
+  bull:  # 牛市
+    technical: 0.30
+    fundamental: 0.10
+    valuation: 0.10
+    money_flow: 0.25
+    sentiment: 0.20
+    industry: 0.05
+
+  bear:  # 熊市
+    technical: 0.20
+    fundamental: 0.25
+    valuation: 0.25
+    money_flow: 0.15
+    sentiment: 0.05
+    industry: 0.10
+
+  neutral:  # 震荡
+    technical: 0.20
+    fundamental: 0.20
+    valuation: 0.20
+    money_flow: 0.15
+    sentiment: 0.15
+    industry: 0.10
+
+# 默认权重（Phase 1 固定使用）
+default: neutral
+
+# 硬性否决规则
+veto_rules:
+  - condition: is_st
+    action: cap_score
+    max_score: -50
+    reason: "ST股票风险极高"
+
+  - condition: is_delisting
+    action: force_sell
+    score: -100
+    reason: "退市风险"
+
+  - condition: is_suspended
+    action: skip
+    reason: "停牌中"
+
+  - condition: ipo_days_lt_60
+    action: skip
+    reason: "次新股波动大，暂不分析"

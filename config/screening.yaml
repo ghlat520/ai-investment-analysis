@@ -1,0 +1,54 @@
+# 量化筛选因子配置
+
+screening:
+  top_n: 50
+  market: A  # A/HK/US
+
+  # 前置过滤（排除）
+  filters:
+    exclude_st: true
+    exclude_delisting: true
+    min_market_cap: 2000000000      # 最小市值 20亿
+    min_avg_volume_20d: 1000000     # 最小20日均成交量
+    min_ipo_days: 60                # 最小上市天数
+
+  # 筛选因子及权重
+  factors:
+    # 技术因子
+    trend_score:
+      weight: 0.25
+      description: "均线多头排列+突破+量能"
+      params:
+        ma_periods: [5, 10, 20, 60]
+
+    momentum_score:
+      weight: 0.20
+      description: "动量因子（N日涨幅、RSI）"
+      params:
+        lookback_days: 20
+        rsi_period: 14
+        rsi_oversold: 30
+        rsi_overbought: 70
+
+    # 估值因子
+    valuation_score:
+      weight: 0.20
+      description: "PE/PB历史分位"
+      params:
+        pe_percentile_window: 1250  # 5年交易日
+        pb_percentile_window: 1250
+
+    # 基本面因子
+    quality_score:
+      weight: 0.20
+      description: "ROE+营收增速+现金流质量"
+      params:
+        min_roe: 8
+        min_revenue_growth: 5
+
+    # 资金因子
+    money_flow_score:
+      weight: 0.15
+      description: "主力资金+北向资金"
+      params:
+        lookback_days: 5

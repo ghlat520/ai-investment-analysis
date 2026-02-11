@@ -1,0 +1,83 @@
+# Agent 配置
+# 每个Agent可独立配置：模型、开关、参数
+
+agents:
+  technical:
+    enabled: true
+    display_name: "技术面分析"
+    llm_provider: openai
+    llm_model: gpt-4o-mini
+    temperature: 0.2
+    max_tokens: 2000
+    timeout: 30
+    prompt_template: prompts/technical.md
+
+  fundamental:
+    enabled: true
+    display_name: "基本面分析"
+    llm_provider: anthropic
+    llm_model: claude-sonnet-4-20250514
+    temperature: 0.3
+    max_tokens: 3000
+    timeout: 45
+    prompt_template: prompts/fundamental.md
+
+  valuation:
+    enabled: true
+    display_name: "估值分析"
+    llm_provider: openai
+    llm_model: gpt-4o-mini
+    temperature: 0.2
+    max_tokens: 2000
+    timeout: 30
+    prompt_template: prompts/valuation.md
+
+  money_flow:
+    enabled: false  # Phase 2
+    display_name: "资金面分析"
+    llm_provider: openai
+    llm_model: gpt-4o-mini
+    temperature: 0.2
+    max_tokens: 2000
+    timeout: 30
+    prompt_template: prompts/money_flow.md
+
+  sentiment:
+    enabled: false  # Phase 2
+    display_name: "情绪面分析"
+    llm_provider: openai
+    llm_model: gpt-4o-mini
+    temperature: 0.3
+    max_tokens: 3000
+    timeout: 45
+    prompt_template: prompts/sentiment.md
+
+  industry:
+    enabled: false  # Phase 3
+    display_name: "产业链分析"
+    llm_provider: anthropic
+    llm_model: claude-sonnet-4-20250514
+    temperature: 0.3
+    max_tokens: 3000
+    timeout: 45
+    prompt_template: prompts/industry.md
+
+  fusion:
+    enabled: true
+    display_name: "决策融合"
+    llm_provider: anthropic
+    llm_model: claude-sonnet-4-20250514
+    temperature: 0.2
+    max_tokens: 4000
+    timeout: 60
+    prompt_template: prompts/fusion.md
+
+  report:
+    enabled: true
+    display_name: "研报生成"
+    llm_provider: anthropic
+    llm_model: claude-sonnet-4-20250514
+    temperature: 0.4
+    max_tokens: 6000
+    timeout: 90
+    prompt_template: prompts/report.md

@@ -1,0 +1,168 @@
+"""
+LangGraph 图编排
+
+定义分析流程的DAG：
+DataLoader → [技术面|基本面|估值|...] (fan-out并行) → 决策融合 → 研报生成
+
+Phase 1 仅启用：技术面 + 基本面 + 估值 + 融合 + 研报
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+import yaml
+from langgraph.graph import END, StateGraph
+from loguru import logger
+
+from .state import AnalysisState
+
+
+def _load_agent_config() -> dict[str, Any]:
+    config_path = Path(__file__).parent.parent.parent / "config" / "agents.yaml"
+    if config_path.exists():
+        with open(config_path) as f:
+            return yaml.safe_load(f).get("agents", {})
+    return {}
+
+
+# ---------- Node functions ----------
+
+
+def data_loader(state: AnalysisState) -> dict[str, Any]:
+    """加载股票数据到State（入口节点）"""
+    logger.info(f"[DataLoader] Loading data for {state.stock.symbol if state.stock else 'N/A'}")
+    if state.stock is None:
+        return {"errors": ["No stock data provided"]}
+
+    return {"analysis_date": date.today().isoformat()}
+
+
+def technical_analyst(state: AnalysisState) -> dict[str, Any]:
+    """技术面分析Agent"""
+    from .analysts.technical import analyze_technical
+
+    logger.info(f"[TechnicalAnalyst] Analyzing {state.stock.symbol}")
+    try:
+        signal = analyze_technical(state.stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[TechnicalAnalyst] Error: {e}")
+        return {"errors": [f"TechnicalAnalyst error: {e}"]}
+
+
+def fundamental_analyst(state: AnalysisState) -> dict[str, Any]:
+    """基本面分析Agent"""
+    from .analysts.fundamental import analyze_fundamental
+
+    logger.info(f"[FundamentalAnalyst] Analyzing {state.stock.symbol}")
+    try:
+        signal = analyze_fundamental(state.stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[FundamentalAnalyst] Error: {e}")
+        return {"errors": [f"FundamentalAnalyst error: {e}"]}
+
+
+def valuation_analyst(state: AnalysisState) -> dict[str, Any]:
+    """估值分析Agent"""
+    from .analysts.valuation import analyze_valuation
+
+    logger.info(f"[ValuationAnalyst] Analyzing {state.stock.symbol}")
+    try:
+        signal = analyze_valuation(state.stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[ValuationAnalyst] Error: {e}")
+        return {"errors": [f"ValuationAnalyst error: {e}"]}
+
+
+def fusion_agent(state: AnalysisState) -> dict[str, Any]:
+    """决策融合Agent"""
+    from .fusion.engine import fuse_signals
+
+    logger.info(f"[FusionAgent] Fusing {len(state.signals)} signals")
+    try:
+        decision = fuse_signals(state.signals, state.stock)
+        return {"fusion": decision}
+    except Exception as e:
+        logger.error(f"[FusionAgent] Error: {e}")
+        return {"errors": [f"FusionAgent error: {e}"]}
+
+
+def report_agent(state: AnalysisState) -> dict[str, Any]:
+    """研报生成Agent"""
+    from ..report.generator import generate_report
+
+    logger.info(f"[ReportAgent] Generating report for {state.stock.symbol}")
+    try:
+        report = generate_report(state)
+        return {"report": report}
+    except Exception as e:
+        logger.error(f"[ReportAgent] Error: {e}")
+        return {"errors": [f"ReportAgent error: {e}"]}
+
+
+# ---------- Graph construction ----------
+
+
+def build_analysis_graph() -> StateGraph:
+    """构建分析流程图
+
+    Phase 1 结构:
+        data_loader
+            ↓
+        ┌───┼───┐  (fan-out: 并行)
+        技术 基本 估值
+        └───┼───┘  (fan-in: 汇聚)
+            ↓
+        fusion
+            ↓
+        report
+            ↓
+          END
+    """
+    config = _load_agent_config()
+
+    graph = StateGraph(AnalysisState)
+
+    # 添加节点
+    graph.add_node("data_loader", data_loader)
+    graph.add_node("technical", technical_analyst)
+    graph.add_node("fundamental", fundamental_analyst)
+    graph.add_node("valuation", valuation_analyst)
+    graph.add_node("fusion", fusion_agent)
+    graph.add_node("report", report_agent)
+
+    # 入口 → DataLoader
+    graph.set_entry_point("data_loader")
+
+    # DataLoader → 并行分析（fan-out）
+    # 根据配置决定启用哪些Agent
+    enabled_analysts = []
+    for name in ["technical", "fundamental", "valuation"]:
+        agent_cfg = config.get(name, {})
+        if agent_cfg.get("enabled", True):
+            enabled_analysts.append(name)
+
+    # DataLoader 连接到所有启用的分析Agent
+    for analyst in enabled_analysts:
+        graph.add_edge("data_loader", analyst)
+
+    # 所有分析Agent → 融合（fan-in）
+    for analyst in enabled_analysts:
+        graph.add_edge(analyst, "fusion")
+
+    # 融合 → 研报 → 结束
+    graph.add_edge("fusion", "report")
+    graph.add_edge("report", END)
+
+    return graph
+
+
+def compile_analysis_graph():
+    """编译并返回可执行的分析图"""
+    graph = build_analysis_graph()
+    return graph.compile()
