@@ -177,6 +177,87 @@ class AKShareSource(BaseDataSource):
             logger.debug(f"[akshare] 估值数据获取失败: {e}")
             return pd.DataFrame()
 
+    def fetch_batch_financial(self, report_date: str = "") -> pd.DataFrame:
+        """获取全市场业绩报表（东方财富datacenter接口）
+
+        使用 stock_yjbb_em，一次返回 ~5000+ 只股票的核心财务指标。
+        """
+        import akshare as ak
+
+        if not report_date:
+            # 默认取最近一个季报：上年三季报 or 上年年报
+            from datetime import date as d
+            today = d.today()
+            if today.month >= 11:
+                report_date = f"{today.year}0930"
+            elif today.month >= 5:
+                report_date = f"{today.year - 1}1231"
+            else:
+                report_date = f"{today.year - 1}0930"
+
+        try:
+            df = ak.stock_yjbb_em(date=report_date)
+            if df.empty:
+                return df
+
+            result = pd.DataFrame()
+            result["symbol"] = df["股票代码"].apply(
+                lambda x: f"{x}.SZ" if x.startswith(("0", "3")) else f"{x}.SH"
+            )
+            result["name"] = df["股票简称"]
+            result["eps"] = pd.to_numeric(df["每股收益"], errors="coerce")
+            result["bps"] = pd.to_numeric(df["每股净资产"], errors="coerce")
+            result["roe"] = pd.to_numeric(df["净资产收益率"], errors="coerce")
+            result["gross_margin"] = pd.to_numeric(df["销售毛利率"], errors="coerce")
+            result["revenue_yoy"] = pd.to_numeric(df["营业总收入-同比增长"], errors="coerce")
+            result["profit_yoy"] = pd.to_numeric(df["净利润-同比增长"], errors="coerce")
+            result["cashflow_per_share"] = pd.to_numeric(df["每股经营现金流量"], errors="coerce")
+            result["industry"] = df["所处行业"]
+            result["report_date"] = report_date
+
+            logger.debug(f"[akshare] 批量财务数据: {len(result)}只, 报告期={report_date}")
+            return result
+        except Exception as e:
+            logger.debug(f"[akshare] 批量财务数据失败: {e}")
+            return pd.DataFrame()
+
+    def fetch_spot_data(self, market: str = "A") -> pd.DataFrame:
+        """获取全市场实时行情快照"""
+        import akshare as ak
+
+        if market != "A":
+            return pd.DataFrame()
+
+        try:
+            df = ak.stock_zh_a_spot_em()
+            if df.empty:
+                return df
+
+            result = pd.DataFrame()
+            result["symbol"] = df["代码"].apply(
+                lambda x: f"{x}.SZ" if x.startswith(("0", "3")) else f"{x}.SH"
+            )
+            result["name"] = df["名称"]
+            result["price"] = pd.to_numeric(df["最新价"], errors="coerce")
+            result["change_pct"] = pd.to_numeric(df["涨跌幅"], errors="coerce")
+            result["volume"] = pd.to_numeric(df["成交量"], errors="coerce")
+            result["amount"] = pd.to_numeric(df["成交额"], errors="coerce")
+            result["turnover_rate"] = pd.to_numeric(df["换手率"], errors="coerce")
+            result["amplitude"] = pd.to_numeric(df["振幅"], errors="coerce")
+            result["pe"] = pd.to_numeric(df.get("市盈率-动态"), errors="coerce")
+            result["pb"] = pd.to_numeric(df.get("市净率"), errors="coerce")
+            result["total_market_cap"] = pd.to_numeric(df.get("总市值"), errors="coerce")
+            result["float_market_cap"] = pd.to_numeric(df.get("流通市值"), errors="coerce")
+            result["change_pct_60d"] = pd.to_numeric(df.get("60日涨跌幅"), errors="coerce")
+            result["change_pct_ytd"] = pd.to_numeric(df.get("年初至今涨跌幅"), errors="coerce")
+            result["volume_ratio"] = pd.to_numeric(df.get("量比"), errors="coerce")
+
+            logger.debug(f"[akshare] 实时行情: {len(result)}只")
+            return result
+        except Exception as e:
+            logger.debug(f"[akshare] 实时行情获取失败: {e}")
+            return pd.DataFrame()
+
     def fetch_money_flow(self, symbol: str, days: int = 20) -> pd.DataFrame:
         import akshare as ak
 

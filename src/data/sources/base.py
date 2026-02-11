@@ -75,3 +75,20 @@ class BaseDataSource(ABC):
     def fetch_valuation(self, symbol: str) -> pd.DataFrame:
         """获取估值数据"""
         raise NotImplementedError(f"{self.name} 不支持估值数据")
+
+    def fetch_batch_financial(self, report_date: str = "") -> pd.DataFrame:
+        """获取全市场批量财务数据（用于筛选引擎）
+
+        返回标准化列：symbol, name, eps, bps, roe, gross_margin,
+        revenue_yoy, profit_yoy, cashflow_per_share, industry
+        """
+        raise NotImplementedError(f"{self.name} 不支持批量财务数据")
+
+    def fetch_spot_data(self, market: str = "A") -> pd.DataFrame:
+        """获取全市场实时行情快照（含PE/PB/市值/涨跌幅等）
+
+        返回标准化列：symbol, name, price, change_pct, volume, amount,
+        turnover_rate, pe, pb, total_market_cap, float_market_cap,
+        change_pct_60d, change_pct_ytd, volume_ratio
+        """
+        raise NotImplementedError(f"{self.name} 不支持实时行情快照")

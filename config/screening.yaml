@@ -8,47 +8,32 @@ screening:
   filters:
     exclude_st: true
     exclude_delisting: true
-    min_market_cap: 2000000000      # 最小市值 20亿
+    min_market_cap: 2000000000      # 最小市值 20亿（需实时行情数据）
     min_avg_volume_20d: 1000000     # 最小20日均成交量
     min_ipo_days: 60                # 最小上市天数
 
   # 筛选因子及权重
+  # 数据来源策略：
+  #   - quality_score / growth_score: 来自 stock_yjbb_em 批量财报（always available）
+  #   - valuation_score / momentum_score: 来自 stock_zh_a_spot_em 实时行情（may fail）
+  #   - 当实时行情不可用时，权重自动调整到 quality + growth
   factors:
-    # 技术因子
-    trend_score:
-      weight: 0.25
-      description: "均线多头排列+突破+量能"
-      params:
-        ma_periods: [5, 10, 20, 60]
+    # 质量因子：ROE + 毛利率 + 现金流质量
+    quality_score:
+      weight: 0.30
+      description: "ROE（绝对阈值）+ 毛利率（百分位）+ 现金流/EPS 质量（百分位）"
 
+    # 成长因子：营收增速 + 利润增速（百分位排名）
+    growth_score:
+      weight: 0.25
+      description: "营收同比增速 + 净利润同比增速（百分位排名）"
+
+    # 估值因子：PE/PB 逆百分位
+    valuation_score:
+      weight: 0.25
+      description: "PE 逆百分位 + PB 逆百分位（需实时行情数据）"
+
+    # 动量因子：60日涨幅 + YTD涨幅 + 量比（钟形打分）
     momentum_score:
       weight: 0.20
-      description: "动量因子（N日涨幅、RSI）"
-      params:
-        lookback_days: 20
-        rsi_period: 14
-        rsi_oversold: 30
-        rsi_overbought: 70
-
-    # 估值因子
-    valuation_score:
-      weight: 0.20
-      description: "PE/PB历史分位"
-      params:
-        pe_percentile_window: 1250  # 5年交易日
-        pb_percentile_window: 1250
-
-    # 基本面因子
-    quality_score:
-      weight: 0.20
-      description: "ROE+营收增速+现金流质量"
-      params:
-        min_roe: 8
-        min_revenue_growth: 5
-
-    # 资金因子
-    money_flow_score:
-      weight: 0.15
-      description: "主力资金+北向资金"
-      params:
-        lookback_days: 5
+      description: "60日涨幅（钟形20%最优）+ YTD涨幅 + 量比（1.5-3最优）"

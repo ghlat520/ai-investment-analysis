@@ -175,16 +175,34 @@ def screen(market: str, top_n: int) -> None:
     from src.screening.engine import ScreeningEngine
 
     logger.info(f"开始量化筛选: market={market} top_n={top_n}")
+    t0 = time.time()
 
     adapter = AShareAdapter()
     source_manager = adapter.create_source_manager()
     engine = ScreeningEngine(source_manager)
     results = engine.run(market=market)
 
-    click.echo(f"\n{'排名':>4} {'代码':<12} {'名称':<10} {'评分':>8}")
-    click.echo("-" * 40)
+    elapsed = time.time() - t0
+
+    if not results:
+        click.echo("筛选无结果")
+        return
+
+    click.echo(f"\n{'排名':>4} {'代码':<12} {'名称':<8} {'行业':<10} {'综合':>6} {'质量':>5} {'成长':>5} {'估值':>5} {'动量':>5}")
+    click.echo("-" * 72)
     for r in results[:top_n]:
-        click.echo(f"{r.rank:>4} {r.symbol:<12} {r.name:<10} {r.composite_score:>8.2f}")
+        fs = r.factor_scores
+        industry = (r.industry or "")[:8]
+        click.echo(
+            f"{r.rank:>4} {r.symbol:<12} {r.name:<8} {industry:<10}"
+            f" {r.composite_score:>6.1f}"
+            f" {fs.get('quality', 0):>5.1f}"
+            f" {fs.get('growth', 0):>5.1f}"
+            f" {fs.get('valuation', 0):>5.1f}"
+            f" {fs.get('momentum', 0):>5.1f}"
+        )
+
+    click.echo(f"\n耗时: {elapsed:.1f}s | 共{len(results)}只")
 
 
 @main.command()
@@ -238,6 +256,64 @@ def history(stock: str | None, n: int) -> None:
     for r in records:
         dt = r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "N/A"
         click.echo(f"{dt:<20} {r.symbol:<12} {r.final_score:>+6d} {r.final_action:<8} {r.confidence:>6.0%}")
+
+
+@main.command()
+@click.option("--market", default="A", help="市场（A/HK/US）")
+@click.option("--top-n", default=5, help="筛选Top N后深度分析")
+def run(market: str, top_n: int) -> None:
+    """运行完整流水线：筛选 → AI深度分析"""
+    from src.agents.graph import compile_analysis_graph
+    from src.data.storage.persist import persist_analysis
+    from src.market.adapter import AShareAdapter
+    from src.screening.engine import ScreeningEngine
+
+    t0 = time.time()
+
+    # Phase 1: 量化筛选
+    click.echo(f"=== Phase 1: 量化筛选 ===")
+    adapter = AShareAdapter()
+    source_manager = adapter.create_source_manager()
+    engine = ScreeningEngine(source_manager)
+    candidates = engine.run(market=market)
+
+    if not candidates:
+        click.echo("筛选无结果")
+        return
+
+    top_candidates = candidates[:top_n]
+    click.echo(f"筛选完成: {len(candidates)}只候选, 取Top {len(top_candidates)}深度分析\n")
+
+    # Phase 2: AI深度分析
+    click.echo(f"=== Phase 2: AI深度分析 ===")
+    graph = compile_analysis_graph()
+
+    for i, c in enumerate(top_candidates, 1):
+        click.echo(f"\n[{i}/{len(top_candidates)}] {c.name}({c.symbol})...")
+        try:
+            stock_data = _collect_stock_data(c.symbol, market)
+            result = graph.invoke({"stock": stock_data})
+
+            fusion = result.get("fusion")
+            if fusion:
+                click.echo(
+                    f"  评分: {fusion.final_score:+d} | "
+                    f"建议: {fusion.final_action} | "
+                    f"置信度: {fusion.confidence:.0%}"
+                )
+
+            # 持久化
+            try:
+                persist_analysis(result)
+            except Exception as e:
+                logger.warning(f"持久化失败: {e}")
+
+        except Exception as e:
+            click.echo(f"  分析失败: {e}")
+
+    elapsed = time.time() - t0
+    click.echo(f"\n=== 完成 ===")
+    click.echo(f"耗时: {elapsed:.1f}s | 筛选: {len(candidates)}只 → 深度分析: {len(top_candidates)}只")
 
 
 if __name__ == "__main__":

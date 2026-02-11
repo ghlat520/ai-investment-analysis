@@ -90,6 +90,14 @@ class DataSourceManager:
         """获取估值数据"""
         return self._call_with_fallback("fetch_valuation", symbol=symbol)
 
+    def fetch_batch_financial(self, report_date: str = "") -> pd.DataFrame:
+        """获取全市场批量财务数据"""
+        return self._call_with_fallback("fetch_batch_financial", report_date=report_date)
+
+    def fetch_spot_data(self, market: str = "A") -> pd.DataFrame:
+        """获取全市场实时行情快照"""
+        return self._call_with_fallback("fetch_spot_data", market=market)
+
     @property
     def available_sources(self) -> list[str]:
         return [s.name for s in self._sources if s.is_available()]
