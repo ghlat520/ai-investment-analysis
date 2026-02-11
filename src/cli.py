@@ -4,8 +4,12 @@ CLI 入口
 命令：
   ai-invest analyze --stock 000001.SZ    分析单只股票
   ai-invest screen                       量化筛选
-  ai-invest run                          运行完整流水线
+  ai-invest run                          运行完整流水线（筛选→分析→通知）
+  ai-invest scheduler                    启动每日调度器
+  ai-invest notify --test                测试通知渠道
   ai-invest cost                         查看LLM成本
+  ai-invest init-db                      初始化数据库
+  ai-invest history                      查看历史记录
 """
 
 from __future__ import annotations
@@ -53,7 +57,6 @@ def _collect_stock_data(symbol: str, market: str):
     try:
         quotes = source_mgr.fetch_daily_quotes(symbol, start_date, end_date)
         if not quotes.empty:
-            # 尝试从行情数据中获取股票名称
             for col in ["股票名称", "name"]:
                 if col in quotes.columns and quotes[col].iloc[0]:
                     stock_name = str(quotes[col].iloc[0])
@@ -85,9 +88,8 @@ def _collect_stock_data(symbol: str, market: str):
     except Exception as e:
         logger.warning(f"[采集] 估值数据失败: {e}")
 
-    # 合并估值数据到财务数据中：取最新PE/PB附加到每期财报
+    # 合并估值数据到财务数据
     if valuation_data and financial_data:
-        # 取估值序列的最新值作为当前估值
         latest_val = valuation_data[-1]
         for rec in financial_data:
             if "pe_ttm" not in rec or rec.get("pe_ttm") is None:
@@ -97,7 +99,6 @@ def _collect_stock_data(symbol: str, market: str):
             if "total_market_cap" not in rec or rec.get("total_market_cap") is None:
                 rec["total_market_cap"] = latest_val.get("total_market_cap")
 
-    # 如果有估值历史但没财务数据，构造一条最小记录供估值Agent使用
     if valuation_data and not financial_data:
         latest_val = valuation_data[-1]
         financial_data = [{
@@ -107,34 +108,32 @@ def _collect_stock_data(symbol: str, market: str):
             "total_market_cap": latest_val.get("total_market_cap"),
         }]
 
-    # 构建 StockData
     stock_data = StockData(
         symbol=symbol,
         name=stock_name,
         market=market,
         daily_quotes=quotes_data,
         financial_data=financial_data,
-        info={
-            "valuation_history": valuation_data,  # 传递完整历史给估值Agent
-        },
+        info={"valuation_history": valuation_data},
     )
     return stock_data
 
 
+# ─── analyze ───────────────────────────────────────────────
+
 @main.command()
 @click.option("--stock", required=True, help="股票代码（如 000001.SZ）")
 @click.option("--market", default="A", help="市场（A/HK/US）")
-def analyze(stock: str, market: str) -> None:
+@click.option("--notify", "do_notify", is_flag=True, help="分析后推送通知")
+def analyze(stock: str, market: str, do_notify: bool) -> None:
     """分析单只股票"""
     from src.agents.graph import compile_analysis_graph
 
     logger.info(f"开始分析: {stock} (market={market})")
     t0 = time.time()
 
-    # 数据采集
     stock_data = _collect_stock_data(stock, market)
 
-    # 运行分析图
     logger.info(f"[分析] 启动 LangGraph 分析流水线...")
     graph = compile_analysis_graph()
     result = graph.invoke({"stock": stock_data})
@@ -162,7 +161,7 @@ def analyze(stock: str, market: str) -> None:
     if errors:
         click.echo(f"\n错误: {errors}")
 
-    # 持久化到数据库
+    # 持久化
     try:
         from src.data.storage.persist import persist_analysis
         run_id = persist_analysis(result)
@@ -170,6 +169,33 @@ def analyze(stock: str, market: str) -> None:
     except Exception as e:
         logger.warning(f"持久化失败: {e}")
 
+    # 通知推送
+    if do_notify:
+        _notify_single(result)
+
+
+def _notify_single(result: dict) -> None:
+    """推送单只股票分析结果"""
+    from src.notification.manager import NotificationManager
+
+    mgr = NotificationManager.from_env()
+    if not mgr.has_channels:
+        click.echo("未配置通知渠道（设置 .env 中的 WECHAT_WEBHOOK_URL 等）")
+        return
+
+    stock = result.get("stock")
+    fusion = result.get("fusion")
+    if not stock or not fusion:
+        return
+
+    title = f"{stock.name}({stock.symbol}) {fusion.final_action} ({fusion.final_score:+d})"
+    content = result.get("report", fusion.reasoning)
+    send_results = mgr.send(title, content)
+    for ch, ok in send_results.items():
+        click.echo(f"  通知[{ch}]: {'成功' if ok else '失败'}")
+
+
+# ─── screen ────────────────────────────────────────────────
 
 @main.command()
 @click.option("--market", default="A", help="市场（A/HK/US）")
@@ -210,6 +236,90 @@ def screen(market: str, top_n: int) -> None:
     click.echo(f"\n耗时: {elapsed:.1f}s | 共{len(results)}只")
 
 
+# ─── run ───────────────────────────────────────────────────
+
+@main.command()
+@click.option("--market", default="A", help="市场（A/HK/US）")
+@click.option("--top-n", default=5, help="筛选Top N后深度分析")
+@click.option("--notify", "do_notify", is_flag=True, help="完成后推送通知")
+def run(market: str, top_n: int, do_notify: bool) -> None:
+    """运行完整流水线：筛选 → AI深度分析 → 通知"""
+    from src.scheduler.scheduler import run_pipeline, _send_notification
+
+    t0 = time.time()
+    click.echo(f"=== 完整流水线: 筛选 → Top {top_n} 深度分析 ===\n")
+
+    results = run_pipeline(market=market, top_n=top_n)
+
+    elapsed = time.time() - t0
+    click.echo(f"\n=== 完成 ===")
+    click.echo(f"耗时: {elapsed:.1f}s | 分析: {len(results)}只")
+
+    if results:
+        click.echo(f"\n{'排名':>4} {'代码':<12} {'名称':<8} {'评分':>6} {'操作':<8} {'置信度':>6}")
+        click.echo("-" * 50)
+        for r in results:
+            f = r["fusion"]
+            click.echo(f"{r['screening_rank']:>4} {r['symbol']:<12} {r['name']:<8} {f.final_score:>+6d} {f.final_action:<8} {f.confidence:>6.0%}")
+
+    # 通知
+    if do_notify and results:
+        click.echo("\n推送通知...")
+        _send_notification(results)
+
+
+# ─── scheduler ─────────────────────────────────────────────
+
+@main.command()
+@click.option("--time", "trigger_time", default="17:30", help="每日触发时间 (HH:MM)")
+@click.option("--top-n", default=10, help="每日分析Top N")
+@click.option("--run-now", is_flag=True, help="启动后立即执行一次")
+def scheduler(trigger_time: str, top_n: int, run_now: bool) -> None:
+    """启动每日调度器（周一至周五定时运行）"""
+    from src.scheduler.scheduler import AnalysisScheduler
+
+    sched = AnalysisScheduler(trigger_time=trigger_time, top_n=top_n)
+
+    if run_now:
+        sched.run_now()
+
+    click.echo(f"调度器运行中... 每周一至周五 {trigger_time} 自动执行 (Ctrl+C 退出)")
+    sched.start()
+
+
+# ─── notify ────────────────────────────────────────────────
+
+@main.command()
+@click.option("--test", "do_test", is_flag=True, help="发送测试消息")
+def notify(do_test: bool) -> None:
+    """查看/测试通知渠道配置"""
+    from src.notification.manager import NotificationManager
+
+    mgr = NotificationManager.from_env()
+
+    if not mgr.has_channels:
+        click.echo("未配置任何通知渠道")
+        click.echo("请在 .env 中配置以下任一变量：")
+        click.echo("  WECHAT_WEBHOOK_URL  — 企业微信")
+        click.echo("  FEISHU_WEBHOOK_URL  — 飞书")
+        click.echo("  TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID — Telegram")
+        click.echo("  EMAIL_SENDER + EMAIL_PASSWORD + EMAIL_RECEIVERS — 邮件")
+        return
+
+    click.echo(f"已配置渠道: {', '.join(mgr.channel_names)}")
+
+    if do_test:
+        click.echo("发送测试消息...")
+        results = mgr.send(
+            "AI投研助手 测试通知",
+            "这是一条测试消息。\n\n如果您收到此消息，说明通知渠道配置正确。"
+        )
+        for ch, ok in results.items():
+            click.echo(f"  {ch}: {'成功' if ok else '失败'}")
+
+
+# ─── cost ──────────────────────────────────────────────────
+
 @main.command()
 def cost() -> None:
     """查看LLM成本统计"""
@@ -223,6 +333,8 @@ def cost() -> None:
     click.echo(f"  调用次数: {stats['call_count']}")
 
 
+# ─── init-db ───────────────────────────────────────────────
+
 @main.command("init-db")
 def init_db() -> None:
     """初始化数据库（创建表结构）"""
@@ -232,6 +344,8 @@ def init_db() -> None:
     db.create_tables()
     click.echo("数据库初始化完成")
 
+
+# ─── history ───────────────────────────────────────────────
 
 @main.command()
 @click.option("--stock", default=None, help="按股票代码筛选")
@@ -261,64 +375,6 @@ def history(stock: str | None, n: int) -> None:
     for r in records:
         dt = r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "N/A"
         click.echo(f"{dt:<20} {r.symbol:<12} {r.final_score:>+6d} {r.final_action:<8} {r.confidence:>6.0%}")
-
-
-@main.command()
-@click.option("--market", default="A", help="市场（A/HK/US）")
-@click.option("--top-n", default=5, help="筛选Top N后深度分析")
-def run(market: str, top_n: int) -> None:
-    """运行完整流水线：筛选 → AI深度分析"""
-    from src.agents.graph import compile_analysis_graph
-    from src.data.storage.persist import persist_analysis
-    from src.market.adapter import AShareAdapter
-    from src.screening.engine import ScreeningEngine
-
-    t0 = time.time()
-
-    # Phase 1: 量化筛选
-    click.echo(f"=== Phase 1: 量化筛选 ===")
-    adapter = AShareAdapter()
-    source_manager = adapter.create_source_manager()
-    engine = ScreeningEngine(source_manager)
-    candidates = engine.run(market=market)
-
-    if not candidates:
-        click.echo("筛选无结果")
-        return
-
-    top_candidates = candidates[:top_n]
-    click.echo(f"筛选完成: {len(candidates)}只候选, 取Top {len(top_candidates)}深度分析\n")
-
-    # Phase 2: AI深度分析
-    click.echo(f"=== Phase 2: AI深度分析 ===")
-    graph = compile_analysis_graph()
-
-    for i, c in enumerate(top_candidates, 1):
-        click.echo(f"\n[{i}/{len(top_candidates)}] {c.name}({c.symbol})...")
-        try:
-            stock_data = _collect_stock_data(c.symbol, market)
-            result = graph.invoke({"stock": stock_data})
-
-            fusion = result.get("fusion")
-            if fusion:
-                click.echo(
-                    f"  评分: {fusion.final_score:+d} | "
-                    f"建议: {fusion.final_action} | "
-                    f"置信度: {fusion.confidence:.0%}"
-                )
-
-            # 持久化
-            try:
-                persist_analysis(result)
-            except Exception as e:
-                logger.warning(f"持久化失败: {e}")
-
-        except Exception as e:
-            click.echo(f"  分析失败: {e}")
-
-    elapsed = time.time() - t0
-    click.echo(f"\n=== 完成 ===")
-    click.echo(f"耗时: {elapsed:.1f}s | 筛选: {len(candidates)}只 → 深度分析: {len(top_candidates)}只")
 
 
 if __name__ == "__main__":
