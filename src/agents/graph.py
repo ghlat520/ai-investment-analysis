@@ -2,9 +2,10 @@
 LangGraph 图编排
 
 定义分析流程的DAG：
-DataLoader → [技术面|基本面|估值|...] (fan-out并行) → 决策融合 → 研报生成
+DataLoader → [技术面|基本面|估值|资金面|情绪面|...] (fan-out并行) → 决策融合 → 研报生成
 
-Phase 1 仅启用：技术面 + 基本面 + 估值 + 融合 + 研报
+Phase 1: 技术面 + 基本面 + 估值
+Phase 2: + 资金面 + 情绪面
 """
 
 from __future__ import annotations
@@ -84,6 +85,34 @@ def valuation_analyst(state: dict[str, Any]) -> dict[str, Any]:
         return {"errors": [f"ValuationAnalyst error: {e}"]}
 
 
+def money_flow_analyst(state: dict[str, Any]) -> dict[str, Any]:
+    """资金面分析Agent"""
+    from .analysts.money_flow import analyze_money_flow
+
+    stock = state["stock"]
+    logger.info(f"[MoneyFlowAnalyst] Analyzing {stock.symbol}")
+    try:
+        signal = analyze_money_flow(stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[MoneyFlowAnalyst] Error: {e}")
+        return {"errors": [f"MoneyFlowAnalyst error: {e}"]}
+
+
+def sentiment_analyst(state: dict[str, Any]) -> dict[str, Any]:
+    """情绪面分析Agent"""
+    from .analysts.sentiment import analyze_sentiment
+
+    stock = state["stock"]
+    logger.info(f"[SentimentAnalyst] Analyzing {stock.symbol}")
+    try:
+        signal = analyze_sentiment(stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[SentimentAnalyst] Error: {e}")
+        return {"errors": [f"SentimentAnalyst error: {e}"]}
+
+
 def fusion_agent(state: dict[str, Any]) -> dict[str, Any]:
     """决策融合Agent"""
     from .fusion.engine import fuse_signals
@@ -119,12 +148,12 @@ def report_agent(state: dict[str, Any]) -> dict[str, Any]:
 def build_analysis_graph() -> StateGraph:
     """构建分析流程图
 
-    Phase 1 结构:
+    结构:
         data_loader
             ↓
-        ┌───┼───┐  (fan-out: 并行)
-        技术 基本 估值
-        └───┼───┘  (fan-in: 汇聚)
+        ┌──┬──┬──┬──┐  (fan-out: 并行)
+        技术 基本 估值 资金 情绪
+        └──┴──┴──┴──┘  (fan-in: 汇聚)
             ↓
         fusion
             ↓
@@ -134,13 +163,21 @@ def build_analysis_graph() -> StateGraph:
     """
     config = _load_agent_config()
 
+    # Agent名 → node函数 映射
+    analyst_nodes = {
+        "technical": technical_analyst,
+        "fundamental": fundamental_analyst,
+        "valuation": valuation_analyst,
+        "money_flow": money_flow_analyst,
+        "sentiment": sentiment_analyst,
+    }
+
     graph = StateGraph(AnalysisState)
 
     # 添加节点
     graph.add_node("data_loader", data_loader)
-    graph.add_node("technical", technical_analyst)
-    graph.add_node("fundamental", fundamental_analyst)
-    graph.add_node("valuation", valuation_analyst)
+    for name, func in analyst_nodes.items():
+        graph.add_node(name, func)
     graph.add_node("fusion", fusion_agent)
     graph.add_node("report", report_agent)
 
@@ -149,7 +186,7 @@ def build_analysis_graph() -> StateGraph:
 
     # DataLoader → 并行分析（fan-out）
     enabled_analysts = []
-    for name in ["technical", "fundamental", "valuation"]:
+    for name in analyst_nodes:
         agent_cfg = config.get(name, {})
         if agent_cfg.get("enabled", True):
             enabled_analysts.append(name)

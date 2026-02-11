@@ -258,6 +258,31 @@ class AKShareSource(BaseDataSource):
             logger.debug(f"[akshare] 实时行情获取失败: {e}")
             return pd.DataFrame()
 
+    def fetch_stock_news(self, symbol: str, limit: int = 20) -> list[dict]:
+        """获取个股新闻（东方财富接口）"""
+        import akshare as ak
+
+        code = symbol.split(".")[0]
+        try:
+            df = ak.stock_news_em(symbol=code)
+            if df.empty:
+                return []
+
+            results = []
+            for _, row in df.head(limit).iterrows():
+                results.append({
+                    "title": str(row.get("新闻标题", "")),
+                    "content": str(row.get("新闻内容", "")),
+                    "datetime": str(row.get("发布时间", "")),
+                    "source": str(row.get("文章来源", "")),
+                    "url": str(row.get("新闻链接", "")),
+                })
+            logger.debug(f"[akshare] 个股新闻: {code}, {len(results)}条")
+            return results
+        except Exception as e:
+            logger.debug(f"[akshare] 个股新闻获取失败: {e}")
+            return []
+
     def fetch_money_flow(self, symbol: str, days: int = 20) -> pd.DataFrame:
         import akshare as ak
 

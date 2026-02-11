@@ -86,6 +86,22 @@ class DataSourceManager:
             "fetch_money_flow", symbol=symbol, days=days
         )
 
+    def fetch_stock_news(self, symbol: str, limit: int = 20) -> list[dict]:
+        """获取个股新闻（auto-fallback）"""
+        for source in self._sources:
+            if not source.is_available():
+                continue
+            try:
+                results = source.fetch_stock_news(symbol=symbol, limit=limit)
+                if results:
+                    logger.debug(f"[{source.name}].fetch_stock_news 成功，{len(results)}条")
+                    return results
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                source.mark_failed(e)
+        return []
+
     def fetch_valuation(self, symbol: str) -> pd.DataFrame:
         """获取估值数据"""
         return self._call_with_fallback("fetch_valuation", symbol=symbol)

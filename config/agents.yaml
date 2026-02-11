@@ -33,7 +33,7 @@ agents:
     prompt_template: prompts/valuation.md
 
   money_flow:
-    enabled: false  # Phase 2
+    enabled: true
     display_name: "资金面分析"
     llm_provider: openai
     llm_model: gpt-4o-mini
@@ -43,7 +43,7 @@ agents:
     prompt_template: prompts/money_flow.md
 
   sentiment:
-    enabled: false  # Phase 2
+    enabled: true
     display_name: "情绪面分析"
     llm_provider: openai
     llm_model: gpt-4o-mini

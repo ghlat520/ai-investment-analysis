@@ -88,6 +88,26 @@ def _collect_stock_data(symbol: str, market: str):
     except Exception as e:
         logger.warning(f"[采集] 估值数据失败: {e}")
 
+    # 4. 资金流向
+    logger.info(f"[采集] 资金流向...")
+    money_flow_data = []
+    try:
+        money_flow = source_mgr.fetch_money_flow(symbol, days=20)
+        if not money_flow.empty:
+            money_flow_data = money_flow.to_dict("records")
+            logger.info(f"[采集] 资金流向: {len(money_flow_data)}天")
+    except Exception as e:
+        logger.warning(f"[采集] 资金流向失败: {e}")
+
+    # 5. 个股新闻
+    logger.info(f"[采集] 个股新闻...")
+    news_data = []
+    try:
+        news_data = source_mgr.fetch_stock_news(symbol, limit=20)
+        logger.info(f"[采集] 新闻: {len(news_data)}条")
+    except Exception as e:
+        logger.warning(f"[采集] 新闻获取失败: {e}")
+
     # 合并估值数据到财务数据
     if valuation_data and financial_data:
         latest_val = valuation_data[-1]
@@ -114,6 +134,8 @@ def _collect_stock_data(symbol: str, market: str):
         market=market,
         daily_quotes=quotes_data,
         financial_data=financial_data,
+        money_flow=money_flow_data,
+        news=news_data,
         info={"valuation_history": valuation_data},
     )
     return stock_data

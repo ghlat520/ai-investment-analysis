@@ -76,6 +76,13 @@ class BaseDataSource(ABC):
         """获取估值数据"""
         raise NotImplementedError(f"{self.name} 不支持估值数据")
 
+    def fetch_stock_news(self, symbol: str, limit: int = 20) -> list[dict]:
+        """获取个股新闻（部分数据源可能不支持）
+
+        返回: [{title, content, datetime, source}, ...]
+        """
+        raise NotImplementedError(f"{self.name} 不支持个股新闻")
+
     def fetch_batch_financial(self, report_date: str = "") -> pd.DataFrame:
         """获取全市场批量财务数据（用于筛选引擎）
 
