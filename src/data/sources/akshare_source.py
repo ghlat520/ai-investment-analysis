@@ -7,9 +7,6 @@ A股数据：日线行情、财务数据、资金流向、估值。
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import Optional
-
 import pandas as pd
 from loguru import logger
 
@@ -25,7 +22,6 @@ class AKShareSource(BaseDataSource):
     ) -> pd.DataFrame:
         import akshare as ak
 
-        # AKShare用纯数字代码
         code = symbol.split(".")[0]
         df = ak.stock_zh_a_hist(
             symbol=code,
@@ -37,7 +33,6 @@ class AKShareSource(BaseDataSource):
         if df.empty:
             return df
 
-        # 标准化列名
         rename_map = {
             "日期": "date",
             "开盘": "open",
@@ -64,7 +59,6 @@ class AKShareSource(BaseDataSource):
                 "名称": "name",
             }
             df = df.rename(columns=rename_map)
-            # 添加后缀
             df["symbol"] = df["symbol"].apply(
                 lambda x: f"{x}.SZ" if x.startswith(("0", "3")) else f"{x}.SH"
             )
@@ -73,18 +67,114 @@ class AKShareSource(BaseDataSource):
         return pd.DataFrame()
 
     def fetch_financial_data(self, symbol: str) -> pd.DataFrame:
+        """获取财务数据（东方财富接口）
+
+        使用 stock_financial_analysis_indicator_em，返回标准化字段：
+        report_date, roe, roa, gross_margin, net_margin, revenue_yoy,
+        profit_yoy, debt_ratio, current_ratio, operating_cashflow, etc.
+        """
+        import akshare as ak
+
+        try:
+            df = ak.stock_financial_analysis_indicator_em(symbol=symbol)
+            if df.empty:
+                return df
+
+            # 东方财富字段 → 标准字段映射
+            result = pd.DataFrame()
+            result["report_date"] = pd.to_datetime(df["REPORT_DATE"]).dt.date
+            result["report_type"] = df["REPORT_DATE_NAME"]
+
+            # 每股指标
+            result["eps"] = pd.to_numeric(df["EPSJB"], errors="coerce")
+            result["bps"] = pd.to_numeric(df["BPS"], errors="coerce")
+
+            # 盈利能力
+            result["roe"] = pd.to_numeric(df["ROEJQ"], errors="coerce")
+            result["roa"] = pd.to_numeric(df["ZZCJLL"], errors="coerce")
+            result["gross_margin"] = pd.to_numeric(df["XSMLL"], errors="coerce")
+            result["net_margin"] = pd.to_numeric(df["XSJLL"], errors="coerce")
+
+            # 营收与利润绝对值
+            result["revenue"] = pd.to_numeric(df["TOTALOPERATEREVE"], errors="coerce")
+            result["net_profit"] = pd.to_numeric(df["PARENTNETPROFIT"], errors="coerce")
+            result["net_profit_deducted"] = pd.to_numeric(df["KCFJCXSYJLR"], errors="coerce")
+
+            # 成长性（同比增速）
+            result["revenue_yoy"] = pd.to_numeric(df["TOTALOPERATEREVETZ"], errors="coerce")
+            result["profit_yoy"] = pd.to_numeric(df["PARENTNETPROFITTZ"], errors="coerce")
+
+            # 财务健康
+            result["debt_ratio"] = pd.to_numeric(df["ZCFZL"], errors="coerce")
+            result["current_ratio"] = pd.to_numeric(df.get("LD"), errors="coerce")
+            result["quick_ratio"] = pd.to_numeric(df.get("SD"), errors="coerce")
+
+            # 现金流
+            result["operating_cashflow_per_share"] = pd.to_numeric(df["MGJYXJJE"], errors="coerce")
+            # 经营现金流/营收
+            result["cashflow_to_revenue"] = pd.to_numeric(df.get("JYXJLYYSR"), errors="coerce")
+
+            # 按报告日期排序
+            result = result.sort_values("report_date").reset_index(drop=True)
+
+            logger.debug(f"[akshare] 财务数据: {symbol}, {len(result)}期")
+            return result
+        except Exception as e:
+            logger.debug(f"[akshare] 财务数据获取失败: {e}")
+            return pd.DataFrame()
+
+    def fetch_valuation(self, symbol: str) -> pd.DataFrame:
+        """获取估值历史数据（百度股市通接口）
+
+        返回：date, pe_ttm, pb, total_market_cap
+        """
         import akshare as ak
 
         code = symbol.split(".")[0]
         try:
-            # 主要财务指标
-            df = ak.stock_financial_analysis_indicator(symbol=code)
-            if df.empty:
-                return df
-            # 标准化（AKShare财务数据列名可能变化，做兼容处理）
-            return df
+            # 获取 PE/PB/市值 三年历史
+            pe_df = ak.stock_zh_valuation_baidu(
+                symbol=code, indicator="市盈率(TTM)", period="近三年"
+            )
+            pb_df = ak.stock_zh_valuation_baidu(
+                symbol=code, indicator="市净率", period="近三年"
+            )
+            cap_df = ak.stock_zh_valuation_baidu(
+                symbol=code, indicator="总市值", period="近一年"
+            )
+
+            result = pd.DataFrame()
+
+            if not pe_df.empty:
+                pe_df = pe_df.rename(columns={"date": "date", "value": "pe_ttm"})
+                pe_df["date"] = pd.to_datetime(pe_df["date"]).dt.date
+                result = pe_df[["date", "pe_ttm"]]
+
+            if not pb_df.empty:
+                pb_df = pb_df.rename(columns={"value": "pb"})
+                pb_df["date"] = pd.to_datetime(pb_df["date"]).dt.date
+                if result.empty:
+                    result = pb_df[["date", "pb"]]
+                else:
+                    result = result.merge(pb_df[["date", "pb"]], on="date", how="outer")
+
+            if not cap_df.empty:
+                cap_df = cap_df.rename(columns={"value": "total_market_cap"})
+                cap_df["date"] = pd.to_datetime(cap_df["date"]).dt.date
+                if result.empty:
+                    result = cap_df[["date", "total_market_cap"]]
+                else:
+                    result = result.merge(
+                        cap_df[["date", "total_market_cap"]], on="date", how="outer"
+                    )
+
+            if not result.empty:
+                result = result.sort_values("date").reset_index(drop=True)
+                logger.debug(f"[akshare] 估值数据: {code}, {len(result)}天")
+
+            return result
         except Exception as e:
-            logger.debug(f"[akshare] 财务数据获取失败: {e}")
+            logger.debug(f"[akshare] 估值数据获取失败: {e}")
             return pd.DataFrame()
 
     def fetch_money_flow(self, symbol: str, days: int = 20) -> pd.DataFrame:
@@ -92,10 +182,12 @@ class AKShareSource(BaseDataSource):
 
         code = symbol.split(".")[0]
         try:
-            df = ak.stock_individual_fund_flow(stock=code, market="sh" if symbol.endswith(".SH") else "sz")
+            df = ak.stock_individual_fund_flow(
+                stock=code,
+                market="sh" if symbol.endswith(".SH") else "sz",
+            )
             if df.empty:
                 return df
-            # 取最近N天
             return df.tail(days)
         except Exception as e:
             logger.debug(f"[akshare] 资金流向获取失败: {e}")

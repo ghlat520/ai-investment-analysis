@@ -1,56 +1,65 @@
 """
-PostgreSQL 数据库连接管理
+数据库连接管理
 
-SQLAlchemy 2.0 异步引擎 + 会话管理。
+Phase 1：同步 SQLite（本地开发）
+Phase 2+：异步 PostgreSQL（生产环境）
 """
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Generator, Optional
 
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from loguru import logger
+
+from .models import Base
+
+
+_DEFAULT_SQLITE_PATH = Path(__file__).parent.parent.parent.parent / "data" / "ai_invest.db"
 
 
 class Database:
-    """数据库连接管理器"""
+    """同步数据库连接管理器"""
 
-    def __init__(self, url: str, echo: bool = False) -> None:
-        self._engine: AsyncEngine = create_async_engine(
-            url,
-            echo=echo,
-            pool_size=10,
-            max_overflow=20,
-            pool_pre_ping=True,
-        )
-        self._session_factory = async_sessionmaker(
+    def __init__(self, url: Optional[str] = None, echo: bool = False) -> None:
+        if url is None:
+            _DEFAULT_SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            url = f"sqlite:///{_DEFAULT_SQLITE_PATH}"
+
+        self._url = url
+        self._engine = create_engine(url, echo=echo)
+        self._session_factory = sessionmaker(
             self._engine,
-            class_=AsyncSession,
             expire_on_commit=False,
         )
-        logger.info(f"数据库引擎创建完成: {url.split('@')[-1]}")  # 不打印密码
+        # 隐藏密码
+        display_url = url.split("@")[-1] if "@" in url else url
+        logger.debug(f"数据库引擎: {display_url}")
 
-    @asynccontextmanager
-    async def session(self) -> AsyncGenerator[AsyncSession, None]:
+    def create_tables(self) -> None:
+        """创建所有表"""
+        Base.metadata.create_all(self._engine)
+        logger.info("数据库表创建完成")
+
+    @contextmanager
+    def session(self) -> Generator[Session, None, None]:
         """获取数据库会话"""
-        async with self._session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+        session = self._session_factory()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
-    async def close(self) -> None:
+    def close(self) -> None:
         """关闭数据库连接"""
-        await self._engine.dispose()
-        logger.info("数据库连接已关闭")
+        self._engine.dispose()
 
 
 # 全局实例
@@ -60,7 +69,5 @@ _db: Optional[Database] = None
 def get_database() -> Database:
     global _db
     if _db is None:
-        from config.settings import get_settings
-        settings = get_settings()
-        _db = Database(settings.db.database_url)
+        _db = Database()
     return _db

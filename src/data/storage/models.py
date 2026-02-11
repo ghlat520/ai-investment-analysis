@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Optional
-from uuid import UUID
 
 from sqlalchemy import (
     JSON,
@@ -16,13 +15,13 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    Float,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -136,16 +135,16 @@ class AnalysisResult(Base):
     __tablename__ = "analysis_results"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     agent_name: Mapped[str] = mapped_column(String(50), nullable=False)
     signal_score: Mapped[int] = mapped_column(Integer, nullable=False)
     confidence: Mapped[float] = mapped_column(Numeric(4, 3), nullable=False)
     reasoning: Mapped[Optional[str]] = mapped_column(Text)
-    key_factors: Mapped[Optional[dict]] = mapped_column(JSONB)
-    risks: Mapped[Optional[dict]] = mapped_column(JSONB)
+    key_factors: Mapped[Optional[dict]] = mapped_column(JSON)
+    risks: Mapped[Optional[dict]] = mapped_column(JSON)
     data_quality: Mapped[Optional[float]] = mapped_column(Numeric(4, 3))
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB)
+    extra_data: Mapped[Optional[dict]] = mapped_column("metadata", JSON)
     llm_model: Mapped[Optional[str]] = mapped_column(String(100))
     llm_tokens_used: Mapped[Optional[int]] = mapped_column(Integer)
     llm_cost: Mapped[Optional[float]] = mapped_column(Numeric(8, 4))
@@ -157,7 +156,7 @@ class FusionDecisionRecord(Base):
     __tablename__ = "fusion_decisions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     final_score: Mapped[int] = mapped_column(Integer, nullable=False)
     final_action: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -166,11 +165,11 @@ class FusionDecisionRecord(Base):
     stop_loss_pct: Mapped[Optional[float]] = mapped_column(Numeric(6, 2))
     take_profit_pct: Mapped[Optional[float]] = mapped_column(Numeric(6, 2))
     reasoning: Mapped[Optional[str]] = mapped_column(Text)
-    signal_summary: Mapped[Optional[dict]] = mapped_column(JSONB)
-    conflicts: Mapped[Optional[dict]] = mapped_column(JSONB)
+    signal_summary: Mapped[Optional[dict]] = mapped_column(JSON)
+    conflicts: Mapped[Optional[dict]] = mapped_column(JSON)
     conflict_resolution: Mapped[Optional[str]] = mapped_column(Text)
     market_regime: Mapped[Optional[str]] = mapped_column(String(20))
-    weights_used: Mapped[Optional[dict]] = mapped_column(JSONB)
+    weights_used: Mapped[Optional[dict]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
@@ -178,7 +177,7 @@ class InvestmentReport(Base):
     __tablename__ = "investment_reports"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     report_format: Mapped[str] = mapped_column(String(20), default="markdown")
     report_content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -196,7 +195,7 @@ class ScreeningResult(Base):
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     rank: Mapped[int] = mapped_column(Integer, nullable=False)
     composite_score: Mapped[Optional[float]] = mapped_column(Numeric(8, 4))
-    factor_scores: Mapped[Optional[dict]] = mapped_column(JSONB)
+    factor_scores: Mapped[Optional[dict]] = mapped_column(JSON)
     market: Mapped[Optional[str]] = mapped_column(String(10))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
@@ -205,7 +204,7 @@ class LLMCostLog(Base):
     __tablename__ = "llm_cost_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    run_id: Mapped[Optional[UUID]] = mapped_column(PG_UUID(as_uuid=True))
+    run_id: Mapped[Optional[str]] = mapped_column(String(36))
     agent_name: Mapped[Optional[str]] = mapped_column(String(50))
     llm_provider: Mapped[Optional[str]] = mapped_column(String(50))
     llm_model: Mapped[Optional[str]] = mapped_column(String(100))

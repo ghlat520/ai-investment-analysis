@@ -90,13 +90,17 @@ def _score_peg(pe_ttm: float, profit_growth: float) -> tuple[int, str]:
 
 
 def analyze_valuation(stock: StockData) -> AgentSignal:
-    """估值分析主函数"""
+    """估值分析主函数
+
+    优先使用 stock.info["valuation_history"] 中的3年日频PE/PB历史数据，
+    比财报中的季度数据更精确地计算百分位。
+    """
     start = time.time()
 
     fin_df = _to_dataframe(stock.financial_data)
-    quote_df = _to_dataframe(stock.daily_quotes)
+    val_df = _to_dataframe(stock.info.get("valuation_history", []))
 
-    if fin_df.empty:
+    if fin_df.empty and val_df.empty:
         return AgentSignal(
             agent_name="valuation",
             signal_score=0,
@@ -109,24 +113,42 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     all_risks = []
     total_score = 0
 
-    latest = fin_df.iloc[-1]
+    # 确定当前PE/PB值：优先用估值历史最新值，其次用财报数据
+    if not val_df.empty:
+        latest_val = val_df.iloc[-1]
+        pe_ttm = float(latest_val.get("pe_ttm", np.nan))
+        pb = float(latest_val.get("pb", np.nan))
+        pe_history = pd.to_numeric(val_df["pe_ttm"], errors="coerce").dropna() if "pe_ttm" in val_df.columns else pd.Series(dtype=float)
+        pb_history = pd.to_numeric(val_df["pb"], errors="coerce").dropna() if "pb" in val_df.columns else pd.Series(dtype=float)
+        val_days = len(val_df)
+    elif not fin_df.empty:
+        latest_val = fin_df.iloc[-1]
+        pe_ttm = float(latest_val.get("pe_ttm", np.nan))
+        pb = float(latest_val.get("pb", np.nan))
+        pe_history = pd.to_numeric(fin_df["pe_ttm"], errors="coerce").dropna() if "pe_ttm" in fin_df.columns else pd.Series(dtype=float)
+        pb_history = pd.to_numeric(fin_df["pb"], errors="coerce").dropna() if "pb" in fin_df.columns else pd.Series(dtype=float)
+        val_days = 0
+    else:
+        pe_ttm = np.nan
+        pb = np.nan
+        pe_history = pd.Series(dtype=float)
+        pb_history = pd.Series(dtype=float)
+        val_days = 0
 
     # PE分位评分
-    pe_ttm = latest.get("pe_ttm", np.nan)
-    pe_history = fin_df["pe_ttm"].dropna() if "pe_ttm" in fin_df.columns else pd.Series(dtype=float)
     pe_score, pe_desc = _score_pe_percentile(pe_ttm, pe_history)
     total_score += pe_score
     all_factors.append(pe_desc)
 
     # PB分位评分
-    pb = latest.get("pb", np.nan)
-    pb_history = fin_df["pb"].dropna() if "pb" in fin_df.columns else pd.Series(dtype=float)
     pb_score, pb_desc = _score_pb_percentile(pb, pb_history)
     total_score += pb_score
     all_factors.append(pb_desc)
 
-    # PEG评分
-    profit_yoy = latest.get("profit_yoy", np.nan)
+    # PEG评分（需要财报中的利润增速）
+    profit_yoy = np.nan
+    if not fin_df.empty:
+        profit_yoy = float(fin_df.iloc[-1].get("profit_yoy", np.nan))
     peg_score, peg_desc = _score_peg(pe_ttm, profit_yoy)
     total_score += peg_score
     all_factors.append(peg_desc)
@@ -135,9 +157,15 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     # 最大 = 20+15+15 = 50, 最小 = -50
     signal_score = max(-100, min(100, int(total_score * 100 / 50)))
 
-    # 置信度
-    num_reports = len(fin_df)
-    confidence = min(1.0, num_reports / 8)
+    # 置信度：日频估值数据充足则高置信度
+    if val_days > 500:
+        confidence = 0.9
+    elif val_days > 200:
+        confidence = 0.7
+    elif val_days > 0:
+        confidence = 0.5
+    else:
+        confidence = min(1.0, len(fin_df) / 8) * 0.5
 
     # 风险
     if pe_score < -10:
@@ -147,19 +175,23 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
 
     elapsed_ms = int((time.time() - start) * 1000)
 
+    pe_pct = _calc_percentile(pe_history, pe_ttm) if not np.isnan(pe_ttm) and len(pe_history) > 0 else None
+    pb_pct = _calc_percentile(pb_history, pb) if not np.isnan(pb) and len(pb_history) > 0 else None
+
     return AgentSignal(
         agent_name="valuation",
         signal_score=signal_score,
         confidence=round(confidence, 3),
-        reasoning=f"估值综合评分{signal_score}。" + "；".join(all_factors),
+        reasoning=f"估值综合评分{signal_score}（{val_days}天历史数据）。" + "；".join(all_factors),
         key_factors=tuple(all_factors),
         risks=tuple(all_risks),
         data_quality=confidence,
         metadata={
             "pe_ttm": float(pe_ttm) if not np.isnan(pe_ttm) else None,
             "pb": float(pb) if not np.isnan(pb) else None,
-            "pe_percentile": _calc_percentile(pe_history, pe_ttm) if not np.isnan(pe_ttm) else None,
-            "pb_percentile": _calc_percentile(pb_history, pb) if not np.isnan(pb) else None,
+            "pe_percentile": pe_pct,
+            "pb_percentile": pb_pct,
+            "valuation_history_days": val_days,
             "component_scores": {
                 "pe": pe_score,
                 "pb": pb_score,
