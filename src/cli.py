@@ -149,9 +149,14 @@ def analyze(stock: str, market: str) -> None:
 
     # 统计信息
     signals = result.get("signals", [])
+    total_llm_cost = sum(s.llm_cost_usd for s in signals)
+    total_llm_tokens = sum(s.llm_tokens_used for s in signals)
     click.echo(f"\n耗时: {elapsed:.1f}s | Agent数: {len(signals)}")
+    if total_llm_tokens > 0:
+        click.echo(f"LLM: {total_llm_tokens} tokens, ${total_llm_cost:.4f}")
     for s in signals:
-        click.echo(f"  {s.agent_name}: {s.signal_score:+d} (confidence={s.confidence:.0%}, {s.execution_time_ms}ms)")
+        llm_tag = f" [{s.llm_model}]" if s.llm_model else " [code-only]"
+        click.echo(f"  {s.agent_name}: {s.signal_score:+d} (confidence={s.confidence:.0%}, {s.execution_time_ms}ms){llm_tag}")
 
     errors = result.get("errors", [])
     if errors:

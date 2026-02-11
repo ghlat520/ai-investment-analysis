@@ -192,8 +192,55 @@ def _score_cash_quality(df: pd.DataFrame) -> tuple[int, list[str]]:
     return score, factors
 
 
+def _build_financial_summary(df: pd.DataFrame) -> str:
+    """构建最新一期财务摘要供LLM阅读"""
+    latest = df.iloc[-1]
+    lines = []
+    field_names = {
+        "roe": "ROE(%)", "roa": "ROA(%)", "gross_margin": "毛利率(%)",
+        "net_margin": "净利率(%)", "revenue_yoy": "营收同比(%)",
+        "profit_yoy": "净利同比(%)", "debt_ratio": "资产负债率(%)",
+        "current_ratio": "流动比率", "quick_ratio": "速动比率",
+        "eps": "每股收益", "bps": "每股净资产",
+        "revenue": "营收(元)", "net_profit": "净利润(元)",
+    }
+    for key, label in field_names.items():
+        val = latest.get(key)
+        if val is not None and not (isinstance(val, float) and np.isnan(val)):
+            if key in ("revenue", "net_profit"):
+                lines.append(f"- {label}: {val/1e8:.2f}亿")
+            else:
+                lines.append(f"- {label}: {val:.2f}")
+    return "\n".join(lines) if lines else "无详细数据"
+
+
+def _build_financial_trend(df: pd.DataFrame, n: int = 4) -> str:
+    """构建近N期财务趋势表格"""
+    recent = df.tail(n)
+    if recent.empty:
+        return "无趋势数据"
+
+    lines = ["报告期 | ROE% | 毛利率% | 营收同比% | 净利同比% | 负债率%"]
+    lines.append("---|---|---|---|---|---")
+    for _, row in recent.iterrows():
+        rd = row.get("report_date", "")
+        if hasattr(rd, "strftime"):
+            rd = rd.strftime("%Y-%m")
+        roe = f"{row.get('roe', 0):.1f}" if row.get("roe") is not None else "-"
+        gm = f"{row.get('gross_margin', 0):.1f}" if row.get("gross_margin") is not None else "-"
+        rev = f"{row.get('revenue_yoy', 0):.1f}" if row.get("revenue_yoy") is not None else "-"
+        pft = f"{row.get('profit_yoy', 0):.1f}" if row.get("profit_yoy") is not None else "-"
+        dr = f"{row.get('debt_ratio', 0):.1f}" if row.get("debt_ratio") is not None else "-"
+        lines.append(f"{rd} | {roe} | {gm} | {rev} | {pft} | {dr}")
+    return "\n".join(lines)
+
+
 def analyze_fundamental(stock: StockData) -> AgentSignal:
-    """基本面分析主函数"""
+    """基本面分析主函数
+
+    60%代码量化评分 + 40%LLM定性分析（趋势解读、行业对比、风险评估）。
+    LLM不可用时自动降级为纯代码分析。
+    """
     start = time.time()
 
     df = _to_dataframe(stock.financial_data)
@@ -227,13 +274,12 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
     total_score += cash_score
     all_factors.extend(cash_factors)
 
-    # 映射到 -100 ~ +100
-    # 理论最大 = 15+8+7+12+12+8+5+10 = 77, 最小约 -64
-    signal_score = max(-100, min(100, int(total_score * 100 / 77)))
+    # 代码评分（-100 ~ +100）
+    code_score = max(-100, min(100, int(total_score * 100 / 77)))
 
     # 置信度：基于财报期数
     num_reports = len(df)
-    confidence = min(1.0, num_reports / 8)  # 8个季度算完全可信
+    confidence = min(1.0, num_reports / 8)
 
     # 风险检测
     latest = df.iloc[-1]
@@ -242,18 +288,53 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
     if latest.get("profit_yoy", 0) < -30:
         all_risks.append("净利润同比大幅下降超30%")
 
+    # --- LLM增强（可选）---
+    from ..llm_enhance import llm_enhance
+    from datetime import date
+
+    llm_result = llm_enhance(
+        agent_name="fundamental",
+        template_name="fundamental.md",
+        template_vars={
+            "symbol": stock.symbol,
+            "name": stock.name,
+            "analysis_date": date.today().isoformat(),
+            "financial_summary": _build_financial_summary(df),
+            "financial_trend": _build_financial_trend(df),
+        },
+        code_score=code_score,
+        code_reasoning=f"基本面综合评分{code_score}。" + "；".join(all_factors),
+        code_factors=all_factors,
+        code_risks=all_risks,
+    )
+
+    # 合并LLM结果
+    signal_score = max(-100, min(100, code_score + llm_result["score_adjustment"]))
+    reasoning = llm_result["reasoning"]
+    final_factors = all_factors + llm_result["extra_factors"]
+    final_risks = list(all_risks) + llm_result["extra_risks"]
+
+    if llm_result["enhanced"]:
+        confidence = min(1.0, confidence + 0.05)
+
     elapsed_ms = int((time.time() - start) * 1000)
 
     return AgentSignal(
         agent_name="fundamental",
         signal_score=signal_score,
         confidence=round(confidence, 3),
-        reasoning=f"基本面综合评分{signal_score}。" + "；".join(all_factors),
-        key_factors=tuple(all_factors),
-        risks=tuple(all_risks),
+        reasoning=reasoning,
+        key_factors=tuple(final_factors),
+        risks=tuple(final_risks),
         data_quality=confidence,
+        llm_model=llm_result["llm_model"],
+        llm_tokens_used=llm_result["llm_tokens"],
+        llm_cost_usd=llm_result["llm_cost"],
         metadata={
             "total_raw_score": total_score,
+            "code_score": code_score,
+            "llm_adjustment": llm_result["score_adjustment"],
+            "llm_enhanced": llm_result["enhanced"],
             "component_scores": {
                 "profitability": prof_score,
                 "growth": grow_score,

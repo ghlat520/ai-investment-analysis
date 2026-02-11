@@ -165,8 +165,48 @@ def _score_bias(df: pd.DataFrame) -> tuple[int, str]:
     return 0, f"乖离率{bias:.1f}%正常"
 
 
+def _build_indicators_summary(df: pd.DataFrame, ma_cols: dict, component_scores: dict) -> str:
+    """构建指标摘要文本供LLM阅读"""
+    close = df["close"].iloc[-1]
+    lines = [f"最新价: {close:.2f}"]
+
+    for p in [5, 10, 20, 60]:
+        key = f"ma{p}"
+        if key in ma_cols and not np.isnan(ma_cols[key].iloc[-1]):
+            lines.append(f"MA{p}: {ma_cols[key].iloc[-1]:.2f}")
+
+    for name, score in component_scores.items():
+        lines.append(f"{name}评分: {score:+d}")
+
+    if "change_pct" in df.columns:
+        lines.append(f"今日涨跌幅: {df['change_pct'].iloc[-1]:.2f}%")
+
+    return "\n".join(lines)
+
+
+def _build_recent_quotes(df: pd.DataFrame, n: int = 10) -> str:
+    """构建近期行情表格供LLM阅读"""
+    recent = df.tail(n)
+    lines = ["日期 | 收盘 | 涨跌幅% | 成交量"]
+    lines.append("---|---|---|---")
+    for _, row in recent.iterrows():
+        dt = row.get("date", "")
+        if hasattr(dt, "strftime"):
+            dt = dt.strftime("%m-%d")
+        close = row.get("close", 0)
+        chg = row.get("change_pct", 0)
+        vol = row.get("volume", 0)
+        vol_str = f"{vol/10000:.0f}万" if vol > 10000 else str(int(vol))
+        lines.append(f"{dt} | {close:.2f} | {chg:+.2f} | {vol_str}")
+    return "\n".join(lines)
+
+
 def analyze_technical(stock: StockData) -> AgentSignal:
-    """技术面分析主函数"""
+    """技术面分析主函数
+
+    80%代码量化评分 + 20%LLM定性分析（形态识别、支撑阻力、操作建议）。
+    LLM不可用时自动降级为纯代码分析。
+    """
     start = time.time()
 
     df = _to_dataframe(stock.daily_quotes)
@@ -208,14 +248,14 @@ def analyze_technical(stock: StockData) -> AgentSignal:
     scores.append(bias_score)
     factors.append(f"乖离率: {bias_desc}")
 
-    # 综合评分（-100 ~ +100 映射）
+    # 代码评分（-100 ~ +100）
     total = sum(scores)
-    # 当前最大可能分 = 30+20+15+10+10 = 85, 最小 = -85
-    signal_score = max(-100, min(100, int(total * 100 / 85)))
+    code_score = max(-100, min(100, int(total * 100 / 85)))
 
-    # 置信度：基于数据充分度
-    data_days = len(df)
-    confidence = min(1.0, data_days / 250)
+    component_scores = {
+        "ma": ma_score, "macd": macd_score, "rsi": rsi_score,
+        "volume": vol_score, "bias": bias_score,
+    }
 
     # 风险提示
     risks = []
@@ -224,25 +264,57 @@ def analyze_technical(stock: StockData) -> AgentSignal:
     if bias_score < -5:
         risks.append("乖离率过高，短期可能回归均线")
 
+    # --- LLM增强（可选）---
+    from ..llm_enhance import llm_enhance
+    from datetime import date
+
+    llm_result = llm_enhance(
+        agent_name="technical",
+        template_name="technical.md",
+        template_vars={
+            "symbol": stock.symbol,
+            "name": stock.name,
+            "analysis_date": date.today().isoformat(),
+            "indicators_summary": _build_indicators_summary(df, ma_cols, component_scores),
+            "recent_quotes": _build_recent_quotes(df),
+        },
+        code_score=code_score,
+        code_reasoning=f"技术面综合评分{code_score}。" + "；".join(factors),
+        code_factors=factors,
+        code_risks=risks,
+    )
+
+    # 合并LLM结果
+    signal_score = max(-100, min(100, code_score + llm_result["score_adjustment"]))
+    reasoning = llm_result["reasoning"]
+    all_factors = factors + llm_result["extra_factors"]
+    all_risks = list(risks) + llm_result["extra_risks"]
+
+    # 置信度
+    data_days = len(df)
+    confidence = min(1.0, data_days / 250)
+    if llm_result["enhanced"]:
+        confidence = min(1.0, confidence + 0.05)
+
     elapsed_ms = int((time.time() - start) * 1000)
 
     return AgentSignal(
         agent_name="technical",
         signal_score=signal_score,
         confidence=round(confidence, 3),
-        reasoning=f"技术面综合评分{signal_score}。" + "；".join(factors),
-        key_factors=tuple(factors),
-        risks=tuple(risks),
+        reasoning=reasoning,
+        key_factors=tuple(all_factors),
+        risks=tuple(all_risks),
         data_quality=confidence,
+        llm_model=llm_result["llm_model"],
+        llm_tokens_used=llm_result["llm_tokens"],
+        llm_cost_usd=llm_result["llm_cost"],
         metadata={
             "total_raw_score": total,
-            "component_scores": {
-                "ma": ma_score,
-                "macd": macd_score,
-                "rsi": rsi_score,
-                "volume": vol_score,
-                "bias": bias_score,
-            },
+            "code_score": code_score,
+            "llm_adjustment": llm_result["score_adjustment"],
+            "llm_enhanced": llm_result["enhanced"],
+            "component_scores": component_scores,
             "data_days": data_days,
             "latest_close": float(df["close"].iloc[-1]),
         },
