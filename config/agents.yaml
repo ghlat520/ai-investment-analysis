@@ -88,13 +88,24 @@ agents:
 
   industry:
     enabled: true
-    display_name: "产业链分析"
+    display_name: "行业分析"
     llm_provider: anthropic
     llm_model: claude-sonnet-4-20250514
     temperature: 0.3
     max_tokens: 4000
     timeout: 60
     prompt_template: prompts/industry.md
+    llm_mode: primary
+
+  supply_chain:
+    enabled: true
+    display_name: "产业链分析"
+    llm_provider: anthropic
+    llm_model: claude-sonnet-4-20250514
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 60
+    prompt_template: prompts/supply_chain.md
     llm_mode: primary
 
   fusion:

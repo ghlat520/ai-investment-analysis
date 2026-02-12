@@ -22,16 +22,17 @@ from loguru import logger
 
 from ..state import AgentSignal, FusionDecision, StockData
 
-# 默认权重（neutral市场环境，8个Agent）
+# 默认权重（neutral市场环境，9个Agent）
 DEFAULT_WEIGHTS: dict[str, float] = {
-    "technical": 0.12,
-    "fundamental": 0.15,
-    "valuation": 0.15,
-    "money_flow": 0.10,
-    "sentiment": 0.08,
-    "moat": 0.15,
-    "business_model": 0.13,
-    "industry": 0.12,
+    "technical": 0.10,
+    "fundamental": 0.14,
+    "valuation": 0.14,
+    "money_flow": 0.08,
+    "sentiment": 0.07,
+    "moat": 0.13,
+    "business_model": 0.12,
+    "industry": 0.11,
+    "supply_chain": 0.11,
 }
 
 
