@@ -217,7 +217,7 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     pe_pct = _calc_percentile(pe_history, pe_ttm) if not np.isnan(pe_ttm) and len(pe_history) > 0 else None
     pb_pct = _calc_percentile(pb_history, pb) if not np.isnan(pb) and len(pb_history) > 0 else None
 
-    # --- LLM增强（可选）---
+    # --- LLM增强（可选，扩大范围至±40）---
     from ..llm_enhance import llm_enhance
     from datetime import date
 
@@ -238,6 +238,9 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
         code_factors=all_factors,
         code_risks=all_risks,
     )
+
+    # 提取目标价（如果LLM返回了）
+    raw = llm_result.get("raw_response") if isinstance(llm_result.get("raw_response"), dict) else {}
 
     # 合并LLM结果
     signal_score = max(-100, min(100, code_score + llm_result["score_adjustment"]))

@@ -46,6 +46,10 @@ class FusionDecision:
     conflict_resolution: str = ""
     market_regime: str = "neutral"
     weights_used: dict[str, float] = field(default_factory=dict)
+    bull_arguments: tuple[str, ...] = ()
+    bear_arguments: tuple[str, ...] = ()
+    divergence_points: tuple[str, ...] = ()
+    target_prices: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

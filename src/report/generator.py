@@ -2,8 +2,7 @@
 研报生成器
 
 将融合决策和各Agent分析结果生成结构化投研报告。
-Phase 1: Markdown格式 + 可选LLM增强核心逻辑
-Phase 3: HTML/PDF
+支持8-Agent深度分析 + 多空辩论 + 目标价 + 操作建议。
 """
 
 from __future__ import annotations
@@ -37,6 +36,8 @@ _AGENT_DISPLAY = {
     "valuation": "估值",
     "money_flow": "资金面",
     "sentiment": "情绪面",
+    "moat": "护城河",
+    "business_model": "商业模式",
     "industry": "产业链",
 }
 
@@ -49,18 +50,26 @@ def _build_report_context(state: dict[str, Any]) -> str:
     parts = []
     if fusion:
         parts.append(f"综合评分: {fusion.final_score:+d}, 建议: {fusion.final_action}")
+        if fusion.bull_arguments:
+            parts.append(f"\n多方论据: {'; '.join(fusion.bull_arguments[:5])}")
+        if fusion.bear_arguments:
+            parts.append(f"\n空方论据: {'; '.join(fusion.bear_arguments[:5])}")
+        if fusion.target_prices:
+            tp = fusion.target_prices
+            parts.append(f"\n目标价: 保守{tp.get('conservative', 0):.2f} / 中性{tp.get('base', 0):.2f} / 乐观{tp.get('optimistic', 0):.2f}")
     for s in signals:
         name = _AGENT_DISPLAY.get(s.agent_name, s.agent_name)
-        parts.append(f"{name}({s.signal_score:+d}): {s.reasoning[:100]}")
+        parts.append(f"{name}({s.signal_score:+d}): {s.reasoning[:120]}")
     return "\n".join(parts)
 
 
 def _llm_enhance_report(state: dict[str, Any]) -> dict[str, Any]:
-    """LLM生成更自然的核心逻辑摘要
-
-    返回: {"enhanced": bool, "core_logic": str, "llm_model": str, ...}
-    """
-    result = {"enhanced": False, "core_logic": "", "llm_model": "", "llm_tokens": 0, "llm_cost": 0.0}
+    """LLM生成更自然的核心逻辑摘要"""
+    result = {
+        "enhanced": False, "core_logic": "",
+        "operation_advice": {}, "key_tracking": [],
+        "llm_model": "", "llm_tokens": 0, "llm_cost": 0.0,
+    }
 
     stock = state.get("stock")
     fusion = state.get("fusion")
@@ -99,10 +108,7 @@ def _llm_enhance_report(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def generate_report(state: dict[str, Any]) -> str:
-    """生成Markdown研报
-
-    state 是 LangGraph 的 TypedDict，通过 dict 方式访问。
-    """
+    """生成Markdown研报"""
     stock = state.get("stock")
     fusion = state.get("fusion")
     signals = state.get("signals", [])
@@ -135,6 +141,28 @@ def generate_report(state: dict[str, Any]) -> str:
         "",
     ]
 
+    # 目标价
+    if fusion.target_prices:
+        tp = fusion.target_prices
+        conservative = tp.get("conservative", 0)
+        base = tp.get("base", 0)
+        optimistic = tp.get("optimistic", 0)
+        if any(v > 0 for v in [conservative, base, optimistic]):
+            lines.append("## 目标价")
+            lines.append("")
+            lines.append(f"| 情景 | 目标价 |")
+            lines.append(f"|------|--------|")
+            if conservative > 0:
+                lines.append(f"| 保守 | {conservative:.2f}元 |")
+            if base > 0:
+                lines.append(f"| 中性 | {base:.2f}元 |")
+            if optimistic > 0:
+                lines.append(f"| 乐观 | {optimistic:.2f}元 |")
+            pw = tp.get("probability_weighted", 0)
+            if pw > 0:
+                lines.append(f"| 概率加权 | {pw:.2f}元 |")
+            lines.append("")
+
     # 核心逻辑
     lines.append("## 核心逻辑")
     lines.append("")
@@ -144,14 +172,41 @@ def generate_report(state: dict[str, Any]) -> str:
         lines.append(fusion.reasoning)
     lines.append("")
 
+    # 多空博弈
+    if fusion.bull_arguments or fusion.bear_arguments:
+        lines.append("## 多空博弈")
+        lines.append("")
+        if fusion.bull_arguments:
+            lines.append("### 多方论据")
+            lines.append("")
+            for arg in fusion.bull_arguments[:8]:
+                lines.append(f"- {arg}")
+            lines.append("")
+        if fusion.bear_arguments:
+            lines.append("### 空方论据")
+            lines.append("")
+            for arg in fusion.bear_arguments[:8]:
+                lines.append(f"- {arg}")
+            lines.append("")
+
+    # 可验证分歧点
+    if fusion.divergence_points:
+        lines.append("## 可验证分歧点")
+        lines.append("")
+        for dp in fusion.divergence_points:
+            lines.append(f"- {dp}")
+        lines.append("")
+
     # 融合权重
     if fusion.weights_used:
         lines.append("## 信号权重")
         lines.append("")
+        lines.append("| 维度 | 权重 | 评分 |")
+        lines.append("|------|------|------|")
         for agent_name, weight in sorted(fusion.weights_used.items(), key=lambda x: -x[1]):
             display = _AGENT_DISPLAY.get(agent_name, agent_name)
             score = fusion.signal_summary.get(agent_name, 0)
-            lines.append(f"- {display}: 权重{weight:.0%} | 评分{score:+d}")
+            lines.append(f"| {display} | {weight:.0%} | {score:+d} |")
         lines.append("")
 
     # 各维度分析
@@ -161,15 +216,20 @@ def generate_report(state: dict[str, Any]) -> str:
         for signal in signals:
             display_name = _AGENT_DISPLAY.get(signal.agent_name, signal.agent_name)
             llm_tag = f" [{signal.llm_model}]" if signal.llm_model else ""
+            mode_tag = ""
+            if isinstance(signal.metadata, dict):
+                llm_mode = signal.metadata.get("llm_mode", "")
+                if llm_mode == "primary":
+                    mode_tag = " (LLM主导)"
 
-            lines.append(f"### {display_name}（{signal.signal_score:+d}）{llm_tag}")
+            lines.append(f"### {display_name}（{signal.signal_score:+d}）{llm_tag}{mode_tag}")
             lines.append("")
             lines.append(f"- **置信度**: {signal.confidence:.0%}")
             lines.append(f"- **分析**: {signal.reasoning}")
             if signal.key_factors:
                 lines.append(f"- **关键因素**: {', '.join(signal.key_factors[:5])}")
             if signal.risks:
-                lines.append(f"- **风险**: {', '.join(signal.risks)}")
+                lines.append(f"- **风险**: {', '.join(signal.risks[:5])}")
             lines.append("")
 
     # 矛盾信号
@@ -189,7 +249,7 @@ def generate_report(state: dict[str, Any]) -> str:
     if all_risks:
         lines.append("## 风险提示")
         lines.append("")
-        for risk in dict.fromkeys(all_risks):  # 去重保持顺序
+        for risk in dict.fromkeys(all_risks):
             lines.append(f"- {risk}")
         lines.append("")
 

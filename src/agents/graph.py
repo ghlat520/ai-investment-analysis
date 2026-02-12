@@ -2,10 +2,12 @@
 LangGraph 图编排
 
 定义分析流程的DAG：
-DataLoader → [技术面|基本面|估值|资金面|情绪面|...] (fan-out并行) → 决策融合 → 研报生成
+DataLoader → [技术面|基本面|估值|资金面|情绪面|护城河|商业模式|产业链] (fan-out并行) → 决策融合 → 研报生成
 
-Phase 1: 技术面 + 基本面 + 估值
-Phase 2: + 资金面 + 情绪面
+8-Agent完整版：
+- 量化优先: technical, money_flow (LLM ±15微调)
+- 混合模式: fundamental, valuation, sentiment (LLM ±40深度增强)
+- LLM主导: moat, business_model, industry (LLM直接评分)
 """
 
 from __future__ import annotations
@@ -113,6 +115,48 @@ def sentiment_analyst(state: dict[str, Any]) -> dict[str, Any]:
         return {"errors": [f"SentimentAnalyst error: {e}"]}
 
 
+def moat_analyst(state: dict[str, Any]) -> dict[str, Any]:
+    """护城河分析Agent"""
+    from .analysts.moat import analyze_moat
+
+    stock = state["stock"]
+    logger.info(f"[MoatAnalyst] Analyzing {stock.symbol}")
+    try:
+        signal = analyze_moat(stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[MoatAnalyst] Error: {e}")
+        return {"errors": [f"MoatAnalyst error: {e}"]}
+
+
+def business_model_analyst(state: dict[str, Any]) -> dict[str, Any]:
+    """商业模式分析Agent"""
+    from .analysts.business_model import analyze_business_model
+
+    stock = state["stock"]
+    logger.info(f"[BusinessModelAnalyst] Analyzing {stock.symbol}")
+    try:
+        signal = analyze_business_model(stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[BusinessModelAnalyst] Error: {e}")
+        return {"errors": [f"BusinessModelAnalyst error: {e}"]}
+
+
+def industry_analyst(state: dict[str, Any]) -> dict[str, Any]:
+    """产业链分析Agent"""
+    from .analysts.industry import analyze_industry
+
+    stock = state["stock"]
+    logger.info(f"[IndustryAnalyst] Analyzing {stock.symbol}")
+    try:
+        signal = analyze_industry(stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[IndustryAnalyst] Error: {e}")
+        return {"errors": [f"IndustryAnalyst error: {e}"]}
+
+
 def fusion_agent(state: dict[str, Any]) -> dict[str, Any]:
     """决策融合Agent"""
     from .fusion.engine import fuse_signals
@@ -151,9 +195,9 @@ def build_analysis_graph() -> StateGraph:
     结构:
         data_loader
             ↓
-        ┌──┬──┬──┬──┐  (fan-out: 并行)
-        技术 基本 估值 资金 情绪
-        └──┴──┴──┴──┘  (fan-in: 汇聚)
+        ┌──┬──┬──┬──┬──┬──┬──┐  (fan-out: 并行)
+        技术 基本 估值 资金 情绪 护城河 商业 产业
+        └──┴──┴──┴──┴──┴──┴──┘  (fan-in: 汇聚)
             ↓
         fusion
             ↓
@@ -170,6 +214,9 @@ def build_analysis_graph() -> StateGraph:
         "valuation": valuation_analyst,
         "money_flow": money_flow_analyst,
         "sentiment": sentiment_analyst,
+        "moat": moat_analyst,
+        "business_model": business_model_analyst,
+        "industry": industry_analyst,
     }
 
     graph = StateGraph(AnalysisState)

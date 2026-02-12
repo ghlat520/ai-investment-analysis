@@ -1,32 +1,39 @@
 # 信号权重配置
 # 根据市场环境动态选择权重方案
+# 8个Agent权重
 
 market_regimes:
-  bull:  # 牛市
-    technical: 0.30
-    fundamental: 0.10
-    valuation: 0.10
-    money_flow: 0.25
-    sentiment: 0.20
-    industry: 0.05
+  bull:  # 牛市：趋势和资金更重要
+    technical: 0.18
+    fundamental: 0.08
+    valuation: 0.08
+    money_flow: 0.18
+    sentiment: 0.13
+    moat: 0.10
+    business_model: 0.10
+    industry: 0.15
 
-  bear:  # 熊市
-    technical: 0.20
-    fundamental: 0.25
-    valuation: 0.25
-    money_flow: 0.15
-    sentiment: 0.05
-    industry: 0.10
+  bear:  # 熊市：价值和护城河更重要
+    technical: 0.10
+    fundamental: 0.15
+    valuation: 0.18
+    money_flow: 0.08
+    sentiment: 0.04
+    moat: 0.18
+    business_model: 0.15
+    industry: 0.12
 
-  neutral:  # 震荡
-    technical: 0.20
-    fundamental: 0.20
-    valuation: 0.20
-    money_flow: 0.15
-    sentiment: 0.15
-    industry: 0.10
+  neutral:  # 震荡：均衡配置
+    technical: 0.12
+    fundamental: 0.15
+    valuation: 0.15
+    money_flow: 0.10
+    sentiment: 0.08
+    moat: 0.15
+    business_model: 0.13
+    industry: 0.12
 
-# 默认权重（Phase 1 固定使用）
+# 默认权重
 default: neutral
 
 # 硬性否决规则

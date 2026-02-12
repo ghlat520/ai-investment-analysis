@@ -288,7 +288,7 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
     if latest.get("profit_yoy", 0) < -30:
         all_risks.append("净利润同比大幅下降超30%")
 
-    # --- LLM增强（可选）---
+    # --- LLM增强（可选，扩大范围至±40）---
     from ..llm_enhance import llm_enhance
     from datetime import date
 
