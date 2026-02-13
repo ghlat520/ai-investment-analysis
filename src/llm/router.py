@@ -38,6 +38,10 @@ PRICING: dict[str, dict[str, float]] = {
     "gpt-4o": {"input": 0.0025, "output": 0.01},
     "claude-sonnet-4-20250514": {"input": 0.003, "output": 0.015},
     "claude-haiku-4-20250414": {"input": 0.0008, "output": 0.004},
+    # Ollama 本地模型（免费）
+    "qwen2.5:14b": {"input": 0.0, "output": 0.0},
+    "qwen2.5:7b": {"input": 0.0, "output": 0.0},
+    "qwen2.5:32b": {"input": 0.0, "output": 0.0},
 }
 
 
@@ -60,7 +64,20 @@ class LLMRouter:
         """获取或创建LLM模型实例"""
         key = f"{provider}:{model_name}"
         if key not in self._models:
-            if provider == "openai":
+            if provider == "ollama":
+                from langchain_openai import ChatOpenAI
+
+                from config.settings import get_settings
+                settings = get_settings()
+                self._models[key] = ChatOpenAI(
+                    model=model_name,
+                    base_url=settings.llm.ollama_base_url,
+                    api_key="ollama",  # Ollama 不需要真实 key
+                    temperature=kwargs.get("temperature", 0.3),
+                    max_tokens=kwargs.get("max_tokens", 2000),
+                    request_timeout=kwargs.get("timeout", 120),
+                )
+            elif provider == "openai":
                 from langchain_openai import ChatOpenAI
                 self._models[key] = ChatOpenAI(
                     model=model_name,

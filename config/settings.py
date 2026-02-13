@@ -32,6 +32,10 @@ class LLMSettings(BaseSettings):
     anthropic_api_key: Optional[str] = None
     anthropic_default_model: str = "claude-sonnet-4-20250514"
 
+    # Ollama（本地部署）
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_default_model: str = "qwen2.5:14b"
+
     # 通用
     llm_temperature: float = 0.3
     llm_max_retries: int = 3

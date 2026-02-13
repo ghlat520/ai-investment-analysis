@@ -30,7 +30,10 @@ class Database:
             url = f"sqlite:///{_DEFAULT_SQLITE_PATH}"
 
         self._url = url
-        self._engine = create_engine(url, echo=echo)
+        connect_args = {}
+        if url.startswith("sqlite"):
+            connect_args["check_same_thread"] = False
+        self._engine = create_engine(url, echo=echo, connect_args=connect_args)
         self._session_factory = sessionmaker(
             self._engine,
             expire_on_commit=False,

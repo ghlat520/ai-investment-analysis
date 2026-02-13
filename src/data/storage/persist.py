@@ -57,6 +57,9 @@ def _save_daily_quotes(session, symbol: str, quotes: list[dict[str, Any]]) -> in
             continue
         if isinstance(trade_date, str):
             trade_date = date.fromisoformat(trade_date[:10])
+        elif hasattr(trade_date, "date"):
+            # pandas Timestamp -> date
+            trade_date = trade_date.date()
         if trade_date in existing_dates:
             continue
 

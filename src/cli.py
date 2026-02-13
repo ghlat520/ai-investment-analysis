@@ -35,110 +35,9 @@ def main(debug: bool) -> None:
 
 
 def _collect_stock_data(symbol: str, market: str):
-    """采集单只股票的全部数据"""
-    from src.agents.state import StockData
-    from src.data.sources import DataSourceManager
-    from src.data.sources.akshare_source import AKShareSource
-    from src.data.sources.efinance_source import EFinanceSource
-    from src.data.sources.yfinance_source import YFinanceSource
-
-    source_mgr = DataSourceManager()
-    source_mgr.register(EFinanceSource())
-    source_mgr.register(AKShareSource())
-    source_mgr.register(YFinanceSource())
-
-    end_date = date.today().isoformat()
-    start_date = (date.today() - timedelta(days=365)).isoformat()
-    stock_name = symbol  # 默认用代码
-
-    # 1. 行情数据
-    logger.info(f"[采集] 行情数据...")
-    quotes_data = []
-    try:
-        quotes = source_mgr.fetch_daily_quotes(symbol, start_date, end_date)
-        if not quotes.empty:
-            for col in ["股票名称", "name"]:
-                if col in quotes.columns and quotes[col].iloc[0]:
-                    stock_name = str(quotes[col].iloc[0])
-                    break
-            quotes_data = quotes.to_dict("records")
-            logger.info(f"[采集] 行情: {len(quotes_data)}条 ({stock_name})")
-    except Exception as e:
-        logger.error(f"[采集] 行情失败: {e}")
-
-    # 2. 财务数据
-    logger.info(f"[采集] 财务数据...")
-    financial_data = []
-    try:
-        financial = source_mgr.fetch_financial_data(symbol)
-        if not financial.empty:
-            financial_data = financial.to_dict("records")
-            logger.info(f"[采集] 财务: {len(financial_data)}期")
-    except Exception as e:
-        logger.warning(f"[采集] 财务数据失败: {e}")
-
-    # 3. 估值数据（PE/PB历史）
-    logger.info(f"[采集] 估值数据...")
-    valuation_data = []
-    try:
-        valuation = source_mgr.fetch_valuation(symbol)
-        if not valuation.empty:
-            valuation_data = valuation.to_dict("records")
-            logger.info(f"[采集] 估值: {len(valuation_data)}天")
-    except Exception as e:
-        logger.warning(f"[采集] 估值数据失败: {e}")
-
-    # 4. 资金流向
-    logger.info(f"[采集] 资金流向...")
-    money_flow_data = []
-    try:
-        money_flow = source_mgr.fetch_money_flow(symbol, days=20)
-        if not money_flow.empty:
-            money_flow_data = money_flow.to_dict("records")
-            logger.info(f"[采集] 资金流向: {len(money_flow_data)}天")
-    except Exception as e:
-        logger.warning(f"[采集] 资金流向失败: {e}")
-
-    # 5. 个股新闻
-    logger.info(f"[采集] 个股新闻...")
-    news_data = []
-    try:
-        news_data = source_mgr.fetch_stock_news(symbol, limit=20)
-        logger.info(f"[采集] 新闻: {len(news_data)}条")
-    except Exception as e:
-        logger.warning(f"[采集] 新闻获取失败: {e}")
-
-    # 合并估值数据到财务数据
-    if valuation_data and financial_data:
-        latest_val = valuation_data[-1]
-        for rec in financial_data:
-            if "pe_ttm" not in rec or rec.get("pe_ttm") is None:
-                rec["pe_ttm"] = latest_val.get("pe_ttm")
-            if "pb" not in rec or rec.get("pb") is None:
-                rec["pb"] = latest_val.get("pb")
-            if "total_market_cap" not in rec or rec.get("total_market_cap") is None:
-                rec["total_market_cap"] = latest_val.get("total_market_cap")
-
-    if valuation_data and not financial_data:
-        latest_val = valuation_data[-1]
-        financial_data = [{
-            "report_date": date.today(),
-            "pe_ttm": latest_val.get("pe_ttm"),
-            "pb": latest_val.get("pb"),
-            "total_market_cap": latest_val.get("total_market_cap"),
-        }]
-
-    stock_data = StockData(
-        symbol=symbol,
-        name=stock_name,
-        market=market,
-        daily_quotes=quotes_data,
-        financial_data=financial_data,
-        money_flow=money_flow_data,
-        news=news_data,
-        info={"valuation_history": valuation_data},
-    )
-    return stock_data
+    """采集单只股票的全部数据（委托给 service 层）"""
+    from src.services.analysis_service import collect_stock_data
+    return collect_stock_data(symbol, market)
 
 
 # ─── analyze ───────────────────────────────────────────────
@@ -397,6 +296,27 @@ def history(stock: str | None, n: int) -> None:
     for r in records:
         dt = r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "N/A"
         click.echo(f"{dt:<20} {r.symbol:<12} {r.final_score:>+6d} {r.final_action:<8} {r.confidence:>6.0%}")
+
+
+# ─── serve ────────────────────────────────────────────────
+
+@main.command()
+@click.option("--host", default="0.0.0.0", help="监听地址")
+@click.option("--port", default=8000, help="监听端口")
+@click.option("--reload", "do_reload", is_flag=True, help="开发模式（自动重载）")
+def serve(host: str, port: int, do_reload: bool) -> None:
+    """启动 Web API 服务"""
+    import uvicorn
+
+    click.echo(f"启动 API 服务: http://{host}:{port}")
+    click.echo("API 文档: http://localhost:{}/docs".format(port))
+    uvicorn.run(
+        "src.server:app",
+        host=host,
+        port=port,
+        reload=do_reload,
+        log_level="info",
+    )
 
 
 if __name__ == "__main__":

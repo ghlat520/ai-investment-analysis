@@ -109,6 +109,9 @@ def _parse_json_response(text: str) -> Optional[dict]:
 
 def _has_llm_key(provider: str) -> bool:
     """检查是否配置了LLM API Key"""
+    if provider == "ollama":
+        # Ollama 本地运行，不需要 API Key
+        return True
     if provider == "openai":
         key = os.environ.get("OPENAI_API_KEY", "")
         return bool(key) and key != "sk-xxx"
