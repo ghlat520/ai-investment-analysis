@@ -11,9 +11,11 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_ENV_FILE_CONF = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+
 
 class DatabaseSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", **_ENV_FILE_CONF)
 
     database_url: str = "postgresql+asyncpg://localhost:5432/ai_investment"
     database_url_sync: str = "postgresql+psycopg2://localhost:5432/ai_investment"
@@ -21,7 +23,7 @@ class DatabaseSettings(BaseSettings):
 
 
 class LLMSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", **_ENV_FILE_CONF)
 
     # OpenAI
     openai_api_key: Optional[str] = None
@@ -35,6 +37,8 @@ class LLMSettings(BaseSettings):
     # Ollama（本地部署）
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_default_model: str = "qwen2.5:14b"
+    ollama_max_concurrent: int = 1       # 匹配 OLLAMA_NUM_PARALLEL，默认串行
+    ollama_request_timeout: int = 300    # 单次推理超时（秒），不含排队等待
 
     # 通用
     llm_temperature: float = 0.3
@@ -44,7 +48,7 @@ class LLMSettings(BaseSettings):
 
 
 class DataSourceSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", **_ENV_FILE_CONF)
 
     tushare_token: Optional[str] = None
 
@@ -55,7 +59,7 @@ class DataSourceSettings(BaseSettings):
 
 
 class SearchSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", **_ENV_FILE_CONF)
 
     bocha_api_keys: str = ""  # 逗号分隔
     tavily_api_keys: str = ""
@@ -68,7 +72,7 @@ class SearchSettings(BaseSettings):
 
 
 class NotificationSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", **_ENV_FILE_CONF)
 
     wechat_webhook_url: Optional[str] = None
     feishu_webhook_url: Optional[str] = None
@@ -80,14 +84,14 @@ class NotificationSettings(BaseSettings):
 
 
 class SchedulerSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="")
+    model_config = SettingsConfigDict(env_prefix="", **_ENV_FILE_CONF)
 
     analysis_trigger_time: str = "17:00"
     timezone: str = "Asia/Shanghai"
 
 
 class ScreeningSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="SCREENING_")
+    model_config = SettingsConfigDict(env_prefix="SCREENING_", **_ENV_FILE_CONF)
 
     top_n: int = 50
     min_market_cap: float = 20e8  # 最小市值 20亿

@@ -10,6 +10,7 @@ LLM路由器
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -59,6 +60,22 @@ class LLMRouter:
         self._total_tokens: int = 0
         self._call_count: int = 0
         self._models: dict[str, Any] = {}
+        # Ollama 并发控制
+        self._semaphores: dict[str, threading.Semaphore] = {}
+        self._queue_depth: dict[str, int] = {}
+        self._queue_lock = threading.Lock()
+
+    def _get_semaphore(self, provider: str) -> Optional[threading.Semaphore]:
+        """获取provider对应的并发信号量，非Ollama返回None"""
+        if provider != "ollama":
+            return None
+        if provider not in self._semaphores:
+            from config.settings import get_settings
+            n = get_settings().llm.ollama_max_concurrent
+            self._semaphores[provider] = threading.Semaphore(n)
+            self._queue_depth[provider] = 0
+            logger.info(f"[LLM] Ollama 并发信号量初始化: max_concurrent={n}")
+        return self._semaphores[provider]
 
     def _get_model(self, provider: str, model_name: str, **kwargs: Any) -> Any:
         """获取或创建LLM模型实例"""
@@ -75,7 +92,7 @@ class LLMRouter:
                     api_key="ollama",  # Ollama 不需要真实 key
                     temperature=kwargs.get("temperature", 0.3),
                     max_tokens=kwargs.get("max_tokens", 2000),
-                    request_timeout=kwargs.get("timeout", 120),
+                    request_timeout=settings.llm.ollama_request_timeout,
                 )
             elif provider == "openai":
                 from langchain_openai import ChatOpenAI
@@ -103,17 +120,29 @@ class LLMRouter:
         user_prompt: str,
         provider: str = "openai",
         model_name: str = "gpt-4o-mini",
+        agent_name: str = "",
         **kwargs: Any,
     ) -> LLMResponse:
         """调用LLM"""
-        start = time.time()
-
         model = self._get_model(provider, model_name, **kwargs)
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
 
+        sem = self._get_semaphore(provider)
+        label = agent_name or model_name
+
+        if sem is not None:
+            with self._queue_lock:
+                self._queue_depth[provider] += 1
+                depth = self._queue_depth[provider]
+            logger.info(f"[LLM] [{label}] 等待 Ollama 推理槽位 (队列深度: {depth})")
+            sem.acquire()
+            with self._queue_lock:
+                self._queue_depth[provider] -= 1
+
+        start = time.time()
         try:
             response = model.invoke(messages)
             latency_ms = int((time.time() - start) * 1000)
@@ -131,7 +160,7 @@ class LLMRouter:
             self._call_count += 1
 
             logger.debug(
-                f"[LLM] {model_name} | {total_tokens} tokens | "
+                f"[LLM] [{label}] {model_name} | {total_tokens} tokens | "
                 f"${cost:.4f} | {latency_ms}ms"
             )
 
@@ -145,8 +174,11 @@ class LLMRouter:
                 latency_ms=latency_ms,
             )
         except Exception as e:
-            logger.error(f"[LLM] {model_name} 调用失败: {e}")
+            logger.error(f"[LLM] [{label}] {model_name} 调用失败: {e}")
             raise
+        finally:
+            if sem is not None:
+                sem.release()
 
     @property
     def stats(self) -> dict[str, Any]:
