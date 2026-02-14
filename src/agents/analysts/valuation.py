@@ -36,11 +36,13 @@ def _calc_percentile(values: pd.Series, current: float) -> float:
 
 
 def _score_pe_percentile(pe_ttm: float, pe_history: pd.Series) -> tuple[int, str]:
-    """PE分位评分"""
+    """PE分位评分（仅在正PE区间内计算百分位，排除亏损期负PE污染）"""
     if np.isnan(pe_ttm) or pe_ttm <= 0:
         return 0, "PE为负或无效"
 
-    pct = _calc_percentile(pe_history, pe_ttm)
+    # 过滤掉负PE（亏损期），仅在盈利期内计算百分位
+    positive_pe = pe_history[pe_history > 0]
+    pct = _calc_percentile(positive_pe, pe_ttm)
 
     if pct < 0.1:
         return 20, f"PE={pe_ttm:.1f}，处于{pct*100:.0f}%分位（极度低估）"
@@ -187,10 +189,23 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     total_score += pb_score
     all_factors.append(pb_desc)
 
-    # PEG评分（需要财报中的利润增速）
+    # PEG评分（使用近2-3年平均增速，减少单期波动）
     profit_yoy = np.nan
     if not fin_df.empty:
-        profit_yoy = float(fin_df.iloc[-1].get("profit_yoy", np.nan))
+        # 取最近几期年报的profit_yoy做平滑
+        if "report_type" in fin_df.columns:
+            annual = fin_df[fin_df["report_type"].astype(str).str.contains("年报", na=False)]
+            growth_series = pd.to_numeric(annual["profit_yoy"], errors="coerce").dropna().tail(3)
+        else:
+            growth_series = pd.to_numeric(fin_df["profit_yoy"], errors="coerce").dropna().tail(3)
+
+        if len(growth_series) >= 2:
+            # 用中位数（比均值更抗突变）
+            profit_yoy = float(growth_series.median())
+        elif len(growth_series) == 1:
+            profit_yoy = float(growth_series.iloc[0])
+        else:
+            profit_yoy = float(fin_df.iloc[-1].get("profit_yoy", np.nan))
     peg_score, peg_desc = _score_peg(pe_ttm, profit_yoy)
     total_score += peg_score
     all_factors.append(peg_desc)
@@ -214,8 +229,11 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     if pb_score < -10:
         all_risks.append("PB处于历史高位")
 
-    pe_pct = _calc_percentile(pe_history, pe_ttm) if not np.isnan(pe_ttm) and len(pe_history) > 0 else None
-    pb_pct = _calc_percentile(pb_history, pb) if not np.isnan(pb) and len(pb_history) > 0 else None
+    # 百分位计算：PE仅用正值（排除亏损期），PB仅用正值
+    positive_pe = pe_history[pe_history > 0] if len(pe_history) > 0 else pe_history
+    positive_pb = pb_history[pb_history > 0] if len(pb_history) > 0 else pb_history
+    pe_pct = _calc_percentile(positive_pe, pe_ttm) if not np.isnan(pe_ttm) and pe_ttm > 0 and len(positive_pe) > 0 else None
+    pb_pct = _calc_percentile(positive_pb, pb) if not np.isnan(pb) and pb > 0 and len(positive_pb) > 0 else None
 
     # --- LLM增强（可选，扩大范围至±40）---
     from ..llm_enhance import llm_enhance

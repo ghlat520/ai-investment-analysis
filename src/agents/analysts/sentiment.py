@@ -237,6 +237,44 @@ def _build_news_content(news: list[dict[str, Any]], n: int = 8) -> str:
 # ─── 主函数 ────────────────────────────────────────────────
 
 
+def _filter_relevant_news(news: list[dict[str, Any]], stock_name: str, symbol: str) -> tuple[list[dict], int]:
+    """过滤出与该股票相关的新闻，剔除通用行业榜单噪声。
+
+    Returns:
+        (相关新闻列表, 被过滤掉的数量)
+    """
+    code = symbol.split(".")[0]  # "300777.SZ" → "300777"
+    name_short = stock_name[:2] if len(stock_name) >= 2 else stock_name  # "常铝股份" → "常铝"
+
+    relevant = []
+    filtered = 0
+    for item in news:
+        title = str(item.get("title", ""))
+        content = str(item.get("content", ""))[:200]
+        text = title + content
+
+        # 直接提到股票名或代码 → 相关
+        if stock_name in text or code in text or name_short in text:
+            relevant.append(item)
+            continue
+
+        # 通用榜单关键词 → 不相关
+        generic_patterns = [
+            "个股一览", "名单", "概念涨", "概念跌", "净流入这些股",
+            "资金今日流入", "资金今日流出", "资金流出榜", "资金流入榜",
+            "站上五日均线", "突破五日均线", "筹码大换手", "筹码集中股",
+            "只股短线", "只A股", "只股涨停",
+        ]
+        if any(p in title for p in generic_patterns):
+            filtered += 1
+            continue
+
+        # 其他新闻保留（可能是行业重要新闻）
+        relevant.append(item)
+
+    return relevant, filtered
+
+
 def analyze_sentiment(stock: StockData) -> AgentSignal:
     """情绪面分析主函数
 
@@ -245,14 +283,28 @@ def analyze_sentiment(stock: StockData) -> AgentSignal:
     """
     start = time.time()
 
-    news = stock.news
-    if not news:
+    raw_news = stock.news
+    if not raw_news:
         return AgentSignal(
             agent_name="sentiment",
             signal_score=0,
             confidence=0.0,
             reasoning="无新闻数据，无法进行情绪面分析",
             data_quality=0.0,
+        )
+
+    # 过滤不相关的通用榜单新闻
+    news, filtered_count = _filter_relevant_news(raw_news, stock.name, stock.symbol)
+    if filtered_count > 0:
+        logger.info(f"[sentiment] 过滤{filtered_count}条无关新闻，保留{len(news)}条相关新闻")
+
+    if not news:
+        return AgentSignal(
+            agent_name="sentiment",
+            signal_score=0,
+            confidence=0.2,
+            reasoning=f"获取{len(raw_news)}条新闻但均为行业通用榜单，无个股相关信息",
+            data_quality=0.1,
         )
 
     # 各维度评分

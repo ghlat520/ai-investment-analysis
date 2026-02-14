@@ -134,6 +134,26 @@ def collect_stock_data(symbol: str, market: str = "A"):
             "total_market_cap": latest_val.get("total_market_cap"),
         }]
 
+    # 6. 数据新鲜度检查
+    data_warnings = []
+    if quotes_data:
+        latest_quote_date = str(quotes_data[-1].get("date", ""))[:10]
+        try:
+            from datetime import datetime
+            latest_dt = datetime.strptime(latest_quote_date, "%Y-%m-%d").date()
+            stale_days = (date.today() - latest_dt).days
+            if stale_days > 5:
+                data_warnings.append(f"行情数据过期: 最新日期{latest_quote_date}，距今{stale_days}天")
+                logger.warning(f"[数据质量] 行情数据可能过期: {latest_quote_date} (距今{stale_days}天)")
+            elif stale_days > 3:
+                data_warnings.append(f"行情数据略旧: {latest_quote_date}，距今{stale_days}天（可能含节假日）")
+                logger.info(f"[数据质量] 行情数据距今{stale_days}天: {latest_quote_date}")
+        except (ValueError, TypeError):
+            pass
+
+    if not valuation_data:
+        data_warnings.append("估值历史数据缺失，百分位计算精度降低")
+
     return StockData(
         symbol=symbol,
         name=stock_name,
@@ -142,7 +162,10 @@ def collect_stock_data(symbol: str, market: str = "A"):
         financial_data=financial_data,
         money_flow=money_flow_data,
         news=news_data,
-        info={"valuation_history": valuation_data},
+        info={
+            "valuation_history": valuation_data,
+            "data_warnings": data_warnings,
+        },
     )
 
 

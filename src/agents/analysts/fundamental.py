@@ -27,12 +27,55 @@ def _to_dataframe(data: list[dict[str, Any]]) -> pd.DataFrame:
     return df
 
 
+def _get_annualized_row(df: pd.DataFrame) -> tuple[pd.Series, str]:
+    """获取年化后的最新财务数据，解决季报/年报ROE混排问题。
+
+    策略：
+    1. 优先用最近年报（report_type含'年报'）
+    2. 如果最近年报太旧（>18个月），用最新季报年化
+    3. 年化方法：Q3 ROE × 4/3, Q2 × 2, Q1 × 4
+    """
+    latest = df.iloc[-1]
+    report_type = str(latest.get("report_type", ""))
+
+    # 尝试找最近年报
+    if "report_type" in df.columns:
+        annual_mask = df["report_type"].astype(str).str.contains("年报", na=False)
+        annual_rows = df[annual_mask]
+        if not annual_rows.empty:
+            annual_latest = annual_rows.iloc[-1]
+            # 检查年报是否太旧（距最新报告超过2期）
+            if len(df) - annual_rows.index[-1] <= 4:
+                return annual_latest, "年报"
+
+    # 没有合适的年报，用最新季报年化
+    annualize_factor = 1.0
+    label = "年报"
+    if "一季报" in report_type or "Q1" in report_type.upper():
+        annualize_factor = 4.0
+        label = "Q1年化"
+    elif "中报" in report_type or "Q2" in report_type.upper():
+        annualize_factor = 2.0
+        label = "中报年化"
+    elif "三季报" in report_type or "Q3" in report_type.upper():
+        annualize_factor = 4.0 / 3.0
+        label = "三季报年化"
+
+    if annualize_factor != 1.0:
+        latest = latest.copy()
+        for col in ["roe", "net_margin"]:
+            val = latest.get(col)
+            if val is not None and not np.isnan(val):
+                latest[col] = val * annualize_factor
+    return latest, label
+
+
 def _score_profitability(df: pd.DataFrame) -> tuple[int, list[str]]:
     """盈利能力评分 (权重30%)"""
     if df.empty or "roe" not in df.columns:
         return 0, ["无盈利数据"]
 
-    latest = df.iloc[-1]
+    latest, period_label = _get_annualized_row(df)
     factors = []
     score = 0
 
@@ -41,16 +84,16 @@ def _score_profitability(df: pd.DataFrame) -> tuple[int, list[str]]:
     if roe is not None and not np.isnan(roe):
         if roe > 20:
             score += 15
-            factors.append(f"ROE={roe:.1f}% 优秀")
+            factors.append(f"ROE={roe:.1f}%({period_label}) 优秀")
         elif roe > 12:
             score += 8
-            factors.append(f"ROE={roe:.1f}% 良好")
+            factors.append(f"ROE={roe:.1f}%({period_label}) 良好")
         elif roe > 6:
             score += 0
-            factors.append(f"ROE={roe:.1f}% 一般")
+            factors.append(f"ROE={roe:.1f}%({period_label}) 一般")
         else:
             score -= 10
-            factors.append(f"ROE={roe:.1f}% 较差")
+            factors.append(f"ROE={roe:.1f}%({period_label}) 较差")
 
     # 毛利率
     gm = latest.get("gross_margin")
@@ -233,8 +276,17 @@ def _build_financial_summary(df: pd.DataFrame) -> str:
 
 
 def _build_financial_trend(df: pd.DataFrame, n: int = 4) -> str:
-    """构建近N期财务趋势表格"""
-    recent = df.tail(n)
+    """构建近N期财务趋势表格（优先使用年报做同口径对比）"""
+    # 优先筛选年报，保证同口径对比
+    if "report_type" in df.columns:
+        annual = df[df["report_type"].astype(str).str.contains("年报", na=False)]
+        if len(annual) >= 2:
+            recent = annual.tail(n)
+        else:
+            recent = df.tail(n)
+    else:
+        recent = df.tail(n)
+
     if recent.empty:
         return "无趋势数据"
 

@@ -7,6 +7,7 @@ Auto-fallback: 按优先级尝试多个数据源，失败自动切换。
 
 from __future__ import annotations
 
+import time as _time
 from typing import Any, Callable, Optional
 
 import pandas as pd
@@ -103,8 +104,24 @@ class DataSourceManager:
         return []
 
     def fetch_valuation(self, symbol: str) -> pd.DataFrame:
-        """获取估值数据"""
-        return self._call_with_fallback("fetch_valuation", symbol=symbol)
+        """获取估值数据（带重试，应对API限流）"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = self._call_with_fallback("fetch_valuation", symbol=symbol)
+                if not result.empty:
+                    return result
+            except AllSourcesFailedError:
+                if attempt < max_retries - 1:
+                    wait = 2 ** attempt  # 1s, 2s, 4s 指数退避
+                    logger.warning(f"[估值] 第{attempt+1}次获取失败，{wait}s后重试...")
+                    _time.sleep(wait)
+                    # 重置源的冷却状态以允许重试
+                    for source in self._sources:
+                        source._last_failure_time = None
+                else:
+                    raise
+        return pd.DataFrame()
 
     def fetch_batch_financial(self, report_date: str = "") -> pd.DataFrame:
         """获取全市场批量财务数据"""
