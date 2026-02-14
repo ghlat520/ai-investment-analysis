@@ -11,6 +11,9 @@ import StrategyPoints from './components/StrategyPoints';
 import BullBearDebate from './components/BullBearDebate';
 import AgentProgressGrid from './components/AgentProgressGrid';
 import ReportViewer from './components/ReportViewer';
+import HotspotView from './components/hotspot/HotspotView';
+
+type TabType = 'analysis' | 'hotspot';
 
 // API returns flat structure, not wrapped in `result`
 interface HistoryDetail {
@@ -43,6 +46,9 @@ function toTaskResult(detail: HistoryDetail): TaskResult | null {
 
 function App() {
   const store = useAnalysisStore();
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<TabType>('analysis');
 
   // History state
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
@@ -163,6 +169,8 @@ function App() {
 
   // Handle analyze from StockInput
   const handleAnalyze = async (symbol: string, market: string) => {
+    // Switch to analysis tab when analyzing
+    setActiveTab('analysis');
     try {
       store.reset();
       const resp = await analysisApi.analyze(symbol, market);
@@ -177,6 +185,12 @@ function App() {
     }
   };
 
+  // Handle stock click from hotspot → trigger individual analysis
+  const handleHotspotStockClick = (symbol: string) => {
+    setActiveTab('analysis');
+    handleAnalyze(symbol, 'A');
+  };
+
   const isAnalyzing = store.status !== 'idle' && store.status !== 'completed' && store.status !== 'failed';
   const showAgentGrid = store.status === 'collecting' || store.status === 'analyzing';
 
@@ -188,10 +202,39 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-base)]">
-      {/* Header - top input bar */}
+      {/* Header - top input bar + tab switch */}
       <header className="flex-shrink-0 px-4 py-3 border-b border-white/5">
         <div className="max-w-[1440px] mx-auto w-full flex items-center justify-between">
-          <StockInput isRunning={isAnalyzing} onAnalyze={handleAnalyze} />
+          <div className="flex items-center gap-4">
+            {/* Tab switch */}
+            <div className="flex rounded-lg bg-white/5 p-0.5">
+              <button
+                onClick={() => setActiveTab('analysis')}
+                className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                  activeTab === 'analysis'
+                    ? 'bg-[var(--color-cyan)]/20 text-[var(--color-cyan)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                }`}
+              >
+                个股分析
+              </button>
+              <button
+                onClick={() => setActiveTab('hotspot')}
+                className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                  activeTab === 'hotspot'
+                    ? 'bg-[var(--color-cyan)]/20 text-[var(--color-cyan)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+                }`}
+              >
+                盘前热点
+              </button>
+            </div>
+
+            {/* Stock input (only show in analysis tab) */}
+            {activeTab === 'analysis' && (
+              <StockInput isRunning={isAnalyzing} onAnalyze={handleAnalyze} />
+            )}
+          </div>
           <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] ml-4">
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-danger)]'}`} />
             {isConnected ? 'SSE' : '断开'}
@@ -200,97 +243,104 @@ function App() {
       </header>
 
       {/* Main content area */}
-      <main className="flex-1 flex overflow-hidden p-3 gap-3 max-w-[1440px] mx-auto w-full">
-        {/* Left sidebar: tasks + history */}
-        <div className="flex flex-col gap-3 w-72 flex-shrink-0 overflow-hidden">
-          <TaskPanel tasks={activeTasks} />
-          <HistoryList
-            items={historyItems}
-            isLoading={isLoadingHistory}
-            isLoadingMore={isLoadingMore}
-            hasMore={hasMore}
-            selectedRunId={selectedRunId}
-            onItemClick={handleHistoryClick}
-            onLoadMore={handleLoadMore}
-            className="flex-1"
-          />
-        </div>
+      {activeTab === 'analysis' ? (
+        <main className="flex-1 flex overflow-hidden p-3 gap-3 max-w-[1440px] mx-auto w-full">
+          {/* Left sidebar: tasks + history */}
+          <div className="flex flex-col gap-3 w-72 flex-shrink-0 overflow-hidden">
+            <TaskPanel tasks={activeTasks} />
+            <HistoryList
+              items={historyItems}
+              isLoading={isLoadingHistory}
+              isLoadingMore={isLoadingMore}
+              hasMore={hasMore}
+              selectedRunId={selectedRunId}
+              onItemClick={handleHistoryClick}
+              onLoadMore={handleLoadMore}
+              className="flex-1"
+            />
+          </div>
 
-        {/* Right: report content */}
-        <section className="flex-1 overflow-y-auto pl-1">
-          {isLoadingReport ? (
-            <div className="flex flex-col items-center justify-center h-full">
-              <div className="w-10 h-10 border-3 border-[var(--color-cyan)]/20 border-t-[var(--color-cyan)] rounded-full animate-spin" />
-              <p className="mt-3 text-[var(--text-secondary)] text-sm">加载报告中...</p>
-            </div>
-          ) : reportData ? (
-            <div className="max-w-4xl space-y-4">
-              {/* Overview: header + gauge + insights + advice */}
-              {reportData.fusion && (
-                <>
-                  <ReportOverview
-                    fusion={reportData.fusion}
-                    stockName={reportStockName}
-                    symbol={reportSymbol}
-                    createdAt={reportCreatedAt}
-                  />
-
-                  {/* Strategy points */}
-                  <StrategyPoints fusion={reportData.fusion} signals={reportData.signals || []} />
-
-                  {/* Agent progress (only during analysis) */}
-                  <AgentProgressGrid agents={store.agents} visible={showAgentGrid} />
-
-                  {/* Bull vs Bear */}
-                  <BullBearDebate fusion={reportData.fusion} />
-                </>
-              )}
-
-              {/* Full report */}
-              {reportData.report && <ReportViewer report={reportData.report} />}
-
-              {/* Errors */}
-              {reportData.errors && reportData.errors.length > 0 && (
-                <div className="terminal-card p-4 border-[var(--color-danger)]/30">
-                  <h4 className="text-sm font-medium text-[var(--color-danger)] mb-2">分析过程中的错误</h4>
-                  <ul className="text-xs text-[var(--text-muted)] space-y-1">
-                    {reportData.errors.map((err, i) => (
-                      <li key={i}>{err}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          ) : showAgentGrid ? (
-            <div className="max-w-4xl space-y-4">
-              <AgentProgressGrid agents={store.agents} visible={true} />
-              {store.message && (
-                <div className="terminal-card p-4 text-center">
-                  <p className="text-sm text-[var(--text-secondary)]">{store.message}</p>
-                  <div className="w-full bg-white/5 rounded-full h-1.5 mt-3">
-                    <div
-                      className="h-1.5 rounded-full bg-[var(--color-cyan)] transition-all duration-500"
-                      style={{ width: `${store.progress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="w-12 h-12 mb-3 rounded-xl bg-[var(--bg-elevated)] flex items-center justify-center">
-                <svg className="w-6 h-6 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
+          {/* Right: report content */}
+          <section className="flex-1 overflow-y-auto pl-1">
+            {isLoadingReport ? (
+              <div className="flex flex-col items-center justify-center h-full">
+                <div className="w-10 h-10 border-3 border-[var(--color-cyan)]/20 border-t-[var(--color-cyan)] rounded-full animate-spin" />
+                <p className="mt-3 text-[var(--text-secondary)] text-sm">加载报告中...</p>
               </div>
-              <h3 className="text-base font-medium text-white mb-1.5">开始分析</h3>
-              <p className="text-xs text-[var(--text-muted)] max-w-xs">
-                输入股票代码进行分析，或从左侧选择历史报告查看
-              </p>
-            </div>
-          )}
-        </section>
-      </main>
+            ) : reportData ? (
+              <div className="max-w-4xl space-y-4">
+                {/* Overview: header + gauge + insights + advice */}
+                {reportData.fusion && (
+                  <>
+                    <ReportOverview
+                      fusion={reportData.fusion}
+                      stockName={reportStockName}
+                      symbol={reportSymbol}
+                      createdAt={reportCreatedAt}
+                    />
+
+                    {/* Strategy points */}
+                    <StrategyPoints fusion={reportData.fusion} signals={reportData.signals || []} />
+
+                    {/* Agent progress (only during analysis) */}
+                    <AgentProgressGrid agents={store.agents} visible={showAgentGrid} />
+
+                    {/* Bull vs Bear */}
+                    <BullBearDebate fusion={reportData.fusion} />
+                  </>
+                )}
+
+                {/* Full report */}
+                {reportData.report && <ReportViewer report={reportData.report} />}
+
+                {/* Errors */}
+                {reportData.errors && reportData.errors.length > 0 && (
+                  <div className="terminal-card p-4 border-[var(--color-danger)]/30">
+                    <h4 className="text-sm font-medium text-[var(--color-danger)] mb-2">分析过程中的错误</h4>
+                    <ul className="text-xs text-[var(--text-muted)] space-y-1">
+                      {reportData.errors.map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : showAgentGrid ? (
+              <div className="max-w-4xl space-y-4">
+                <AgentProgressGrid agents={store.agents} visible={true} />
+                {store.message && (
+                  <div className="terminal-card p-4 text-center">
+                    <p className="text-sm text-[var(--text-secondary)]">{store.message}</p>
+                    <div className="w-full bg-white/5 rounded-full h-1.5 mt-3">
+                      <div
+                        className="h-1.5 rounded-full bg-[var(--color-cyan)] transition-all duration-500"
+                        style={{ width: `${store.progress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <div className="w-12 h-12 mb-3 rounded-xl bg-[var(--bg-elevated)] flex items-center justify-center">
+                  <svg className="w-6 h-6 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                <h3 className="text-base font-medium text-white mb-1.5">开始分析</h3>
+                <p className="text-xs text-[var(--text-muted)] max-w-xs">
+                  输入股票代码进行分析，或从左侧选择历史报告查看
+                </p>
+              </div>
+            )}
+          </section>
+        </main>
+      ) : (
+        /* Hotspot tab */
+        <main className="flex-1 overflow-y-auto p-3 max-w-[1440px] mx-auto w-full">
+          <HotspotView onStockClick={handleHotspotStockClick} />
+        </main>
+      )}
     </div>
   );
 }

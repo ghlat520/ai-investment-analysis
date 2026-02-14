@@ -30,6 +30,24 @@ export const analysisApi = {
   },
 };
 
+export const hotspotApi = {
+  analyze() {
+    return apiClient.post('/hotspot/analyze');
+  },
+
+  getStatus(taskId: string) {
+    return apiClient.get(`/hotspot/status/${taskId}`);
+  },
+
+  getLatest() {
+    return apiClient.get('/hotspot/latest');
+  },
+
+  getHistory(limit: number = 20) {
+    return apiClient.get('/hotspot/history', { params: { limit } });
+  },
+};
+
 export const historyApi = {
   list(symbol?: string, limit: number = 20) {
     return apiClient.get('/history/', { params: { symbol, limit } });

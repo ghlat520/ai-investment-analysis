@@ -298,6 +298,56 @@ def history(stock: str | None, n: int) -> None:
         click.echo(f"{dt:<20} {r.symbol:<12} {r.final_score:>+6d} {r.final_action:<8} {r.confidence:>6.0%}")
 
 
+# ─── hotspot ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--output", "-o", default=None, help="输出研报到文件")
+def hotspot(output: str | None) -> None:
+    """盘前热点分析：热点新闻 → 产业链 → 核心标的"""
+    import time as _time
+
+    logger.info("开始盘前热点分析...")
+    t0 = _time.time()
+
+    from src.services.hotspot_service import run_hotspot_streaming
+
+    def on_stage(node_name: str, node_output: dict):
+        if node_name == "collect_and_rank":
+            concepts = node_output.get("ranked_concepts", [])
+            click.echo(f"  数据采集完成，热门概念: {len(concepts)}个")
+        elif node_name == "extract_themes":
+            themes = node_output.get("themes", [])
+            click.echo(f"  主题提取完成: {len(themes)}个")
+            for t in themes:
+                click.echo(f"    - {t.title} (相关度:{t.relevance_score})")
+        elif node_name == "analyze_themes_batch":
+            analyzed = node_output.get("analyzed_themes", [])
+            click.echo(f"  产业链分析完成: {len(analyzed)}个主题")
+        elif node_name == "generate_briefing":
+            click.echo("  研报生成完成")
+
+    result = run_hotspot_streaming(on_stage_done=on_stage)
+
+    elapsed = _time.time() - t0
+
+    # 输出研报
+    briefing = result.get("briefing", "无研报生成")
+    click.echo("\n" + "=" * 60)
+    click.echo(briefing)
+    click.echo("=" * 60)
+    click.echo(f"\n耗时: {elapsed:.1f}s")
+
+    errors = result.get("errors", [])
+    if errors:
+        click.echo(f"错误: {errors}")
+
+    # 保存到文件
+    if output:
+        with open(output, "w", encoding="utf-8") as f:
+            f.write(briefing)
+        click.echo(f"研报已保存: {output}")
+
+
 # ─── serve ────────────────────────────────────────────────
 
 @main.command()

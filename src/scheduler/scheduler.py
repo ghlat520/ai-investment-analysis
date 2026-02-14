@@ -46,6 +46,20 @@ class AnalysisScheduler:
             name="每日分析流水线",
             misfire_grace_time=3600,  # 错过1小时内仍执行
         )
+
+        # 盘前热点分析（每个交易日 08:30）
+        self._scheduler.add_job(
+            self._run_hotspot_pipeline,
+            trigger=CronTrigger(
+                day_of_week="mon-fri",
+                hour=8,
+                minute=30,
+            ),
+            id="hotspot_analysis",
+            name="盘前热点分析",
+            misfire_grace_time=3600,
+        )
+
         logger.info(f"调度器初始化: 每周一至周五 {trigger_time} ({timezone}), top_n={top_n}")
 
     @classmethod
@@ -83,6 +97,41 @@ class AnalysisScheduler:
             logger.error(f"流水线执行失败: {e}", exc_info=True)
         finally:
             self._running = False
+
+    def _run_hotspot_pipeline(self) -> None:
+        """执行盘前热点分析"""
+        start = time.time()
+        logger.info("=" * 60)
+        logger.info(f"开始盘前热点分析 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
+        logger.info("=" * 60)
+
+        try:
+            from src.services.hotspot_service import run_hotspot
+
+            result = run_hotspot()
+            elapsed = time.time() - start
+            themes = result.get("themes", [])
+            logger.info(f"盘前热点分析完成, 耗时{elapsed:.1f}s, {len(themes)}个主题")
+
+            # 通知推送
+            briefing = result.get("briefing", "")
+            if briefing:
+                _send_notification([{
+                    "symbol": "HOTSPOT",
+                    "name": "盘前热点",
+                    "fusion": type("F", (), {
+                        "final_score": 0,
+                        "final_action": "盘前纪要",
+                        "confidence": 1.0,
+                        "position_pct": 0,
+                    })(),
+                    "report": briefing,
+                    "signals": [],
+                    "screening_rank": 0,
+                    "screening_score": 0,
+                }])
+        except Exception as e:
+            logger.error(f"盘前热点分析失败: {e}", exc_info=True)
 
     def run_now(self) -> None:
         """立即执行一次（不等待调度时间）"""

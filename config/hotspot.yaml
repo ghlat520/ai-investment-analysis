@@ -1,0 +1,20 @@
+# 热点分析配置
+hotspot:
+  # 主题数量上限
+  max_themes: 5
+  # 最低相关性评分（低于此分的主题被过滤）
+  min_relevance_score: 50
+  # 采集的概念板块数量
+  top_concepts: 8
+  # 每个概念的成分股数量
+  stocks_per_concept: 10
+
+  # LLM配置
+  llm_provider: ollama
+  llm_model: qwen2.5:14b
+
+  # 缓存TTL（同一天内不重复运行）
+  cache_ttl_hours: 12
+
+  # 盘前调度时间
+  schedule_time: "08:30"
