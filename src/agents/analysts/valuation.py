@@ -239,7 +239,7 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
         code_risks=all_risks,
     )
 
-    # 提取目标价（如果LLM返回了）
+    # 提取LLM丰富字段（V2: 模型选择、情景分析、因子表等）
     raw = llm_result.get("raw_response") if isinstance(llm_result.get("raw_response"), dict) else {}
 
     # 合并LLM结果
@@ -278,6 +278,16 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
                 "pb": pb_score,
                 "peg": peg_score,
             },
+            # V2新增字段（从LLM raw_response提取）
+            "raw_response": raw,
+            "model_selection": raw.get("model_selection"),
+            "factor_table": raw.get("factor_table"),
+            "scenario_analysis": raw.get("scenario_analysis"),
+            "pe_implied_growth": raw.get("pe_implied_growth"),
+            "primary_valuation": raw.get("primary_valuation"),
+            "secondary_valuation": raw.get("secondary_valuation"),
+            "trap_detection": raw.get("trap_detection"),
+            "target_prices": raw.get("target_prices", {}),
         },
         execution_time_ms=elapsed_ms,
     )

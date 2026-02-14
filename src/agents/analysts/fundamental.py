@@ -360,6 +360,15 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
                 "cash_quality": cash_score,
             },
             "num_reports": num_reports,
+            # V2新增字段（从LLM raw_response提取）
+            "raw_response": llm_result.get("raw_response", {}),
+            "quality_rating": llm_result.get("raw_response", {}).get("quality_rating"),
+            "revenue_breakdown": llm_result.get("raw_response", {}).get("revenue_breakdown"),
+            "profitability_detail": llm_result.get("raw_response", {}).get("profitability"),
+            "cash_flow_verification": llm_result.get("raw_response", {}).get("cash_flow_verification"),
+            "growth_analysis": llm_result.get("raw_response", {}).get("growth_analysis"),
+            "red_flags_detail": llm_result.get("raw_response", {}).get("red_flags"),
+            "green_flags_detail": llm_result.get("raw_response", {}).get("green_flags"),
         },
         execution_time_ms=elapsed_ms,
     )

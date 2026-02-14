@@ -50,6 +50,9 @@ class FusionDecision:
     bear_arguments: tuple[str, ...] = ()
     divergence_points: tuple[str, ...] = ()
     target_prices: dict[str, float] = field(default_factory=dict)
+    risk_cross_validation: tuple[dict[str, Any], ...] = ()
+    operation_strategy: dict[str, Any] = field(default_factory=dict)
+    sub_scores: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

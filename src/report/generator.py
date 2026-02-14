@@ -38,7 +38,8 @@ _AGENT_DISPLAY = {
     "sentiment": "情绪面",
     "moat": "护城河",
     "business_model": "商业模式",
-    "industry": "产业链",
+    "industry": "行业",
+    "supply_chain": "产业链",
 }
 
 
@@ -180,13 +181,23 @@ def generate_report(state: dict[str, Any]) -> str:
             lines.append("### 多方论据")
             lines.append("")
             for arg in fusion.bull_arguments[:8]:
-                lines.append(f"- {arg}")
+                if isinstance(arg, dict):
+                    for k, v in arg.items():
+                        display = _AGENT_DISPLAY.get(k, k)
+                        lines.append(f"- [{display}] {v}")
+                else:
+                    lines.append(f"- {arg}")
             lines.append("")
         if fusion.bear_arguments:
             lines.append("### 空方论据")
             lines.append("")
             for arg in fusion.bear_arguments[:8]:
-                lines.append(f"- {arg}")
+                if isinstance(arg, dict):
+                    for k, v in arg.items():
+                        display = _AGENT_DISPLAY.get(k, k)
+                        lines.append(f"- [{display}] {v}")
+                else:
+                    lines.append(f"- {arg}")
             lines.append("")
 
     # 可验证分歧点
@@ -194,7 +205,11 @@ def generate_report(state: dict[str, Any]) -> str:
         lines.append("## 可验证分歧点")
         lines.append("")
         for dp in fusion.divergence_points:
-            lines.append(f"- {dp}")
+            if isinstance(dp, dict):
+                for k, v in dp.items():
+                    lines.append(f"- **{k}**: {v}")
+            else:
+                lines.append(f"- {dp}")
         lines.append("")
 
     # 融合权重
@@ -208,6 +223,140 @@ def generate_report(state: dict[str, Any]) -> str:
             score = fusion.signal_summary.get(agent_name, 0)
             lines.append(f"| {display} | {weight:.0%} | {score:+d} |")
         lines.append("")
+
+    # === V2: 基本面深度分析（收入构成、红旗/绿旗）===
+    fundamental_signal = next((s for s in signals if s.agent_name == "fundamental"), None)
+    if fundamental_signal and isinstance(fundamental_signal.metadata, dict):
+        meta = fundamental_signal.metadata
+        # 收入构成表
+        rev_breakdown = meta.get("revenue_breakdown")
+        if rev_breakdown and isinstance(rev_breakdown, list) and len(rev_breakdown) > 0:
+            lines.append("## 基本面深度分析")
+            lines.append("")
+            lines.append("### 收入构成")
+            lines.append("")
+            lines.append("| 业务板块 | 营收(亿) | 占比 | 毛利率 | 增速 | 角色 | 未来预测 |")
+            lines.append("|---------|---------|------|--------|------|------|---------|")
+            for seg in rev_breakdown:
+                if isinstance(seg, dict):
+                    lines.append(
+                        f"| {seg.get('segment', seg.get('name', '-'))} "
+                        f"| {seg.get('revenue_billion', seg.get('revenue', '-'))} "
+                        f"| {seg.get('revenue_pct', '-')}% "
+                        f"| {seg.get('gross_margin', '-')}% "
+                        f"| {seg.get('growth_rate', '-')}% "
+                        f"| {seg.get('role', '-')} "
+                        f"| {seg.get('future_estimate', seg.get('future_growth_estimate', '-'))} |"
+                    )
+            lines.append("")
+
+        # 质量评级
+        quality = meta.get("quality_rating")
+        if quality:
+            lines.append(f"### 财务质量评级: {quality}")
+            lines.append("")
+
+        # 红旗/绿旗检测
+        red_flags = meta.get("red_flags_detail")
+        green_flags = meta.get("green_flags_detail")
+        if red_flags or green_flags:
+            lines.append("### 红旗/绿旗检测")
+            lines.append("")
+            lines.append("| 检测项 | 状态 | 说明 | 严重等级 |")
+            lines.append("|--------|------|------|---------|")
+            if red_flags and isinstance(red_flags, list):
+                for rf in red_flags:
+                    if isinstance(rf, dict) and rf.get("triggered"):
+                        lines.append(
+                            f"| {rf.get('code', '')}: {rf.get('name', '')} "
+                            f"| {'命中' if rf.get('triggered') else '未命中'} "
+                            f"| {rf.get('detail', '-')} "
+                            f"| {rf.get('severity', '-')} |"
+                        )
+            if green_flags and isinstance(green_flags, list):
+                for gf in green_flags:
+                    if isinstance(gf, dict) and gf.get("triggered"):
+                        lines.append(
+                            f"| {gf.get('code', '')}: {gf.get('name', '')} "
+                            f"| {'命中' if gf.get('triggered') else '未命中'} "
+                            f"| {gf.get('detail', '-')} "
+                            f"| - |"
+                        )
+            lines.append("")
+
+    # === V2: 估值深度分析（模型选择、计算过程、情景分析）===
+    valuation_signal = next((s for s in signals if s.agent_name == "valuation"), None)
+    if valuation_signal and isinstance(valuation_signal.metadata, dict):
+        vmeta = valuation_signal.metadata
+
+        model_sel = vmeta.get("model_selection")
+        if model_sel and isinstance(model_sel, dict):
+            lines.append("## 估值深度分析")
+            lines.append("")
+            lines.append("### 估值模型选择")
+            lines.append("")
+            lines.append(f"- **公司特征**: {model_sel.get('company_profile', '-')}")
+            lines.append(f"- **主模型**: {model_sel.get('primary_model', '-')} — {model_sel.get('primary_reason', model_sel.get('primary_model_reason', '-'))}")
+            lines.append(f"- **辅助模型**: {model_sel.get('secondary_model', '-')} — {model_sel.get('secondary_reason', model_sel.get('secondary_model_reason', '-'))}")
+            lines.append("")
+
+        # 因子权重表
+        factor_table = vmeta.get("factor_table")
+        if factor_table and isinstance(factor_table, list) and len(factor_table) > 0:
+            lines.append("### 估值因子权重表")
+            lines.append("")
+            lines.append("| 因子 | 权重 | 当前值 | 历史分位 | 行业均值 | 评分 | 来源 |")
+            lines.append("|------|------|--------|---------|---------|------|------|")
+            for f in factor_table:
+                if isinstance(f, dict):
+                    lines.append(
+                        f"| {f.get('factor', '-')} "
+                        f"| {f.get('weight', '-')} "
+                        f"| {f.get('current', f.get('current_value', '-'))} "
+                        f"| {f.get('percentile', f.get('historical_percentile', '-'))} "
+                        f"| {f.get('industry_avg', '-')} "
+                        f"| {f.get('score', '-')} "
+                        f"| {f.get('source', f.get('data_source', '-'))} |"
+                    )
+            lines.append("")
+
+        # 主模型计算过程
+        primary_val = vmeta.get("primary_valuation")
+        if primary_val and isinstance(primary_val, dict):
+            lines.append("### 目标价计算过程")
+            lines.append("")
+            lines.append(f"**{primary_val.get('model', '主模型')}**: {primary_val.get('formula', '')}")
+            lines.append("")
+            calc = primary_val.get("calculation", primary_val.get("calculation_steps", ""))
+            if calc:
+                lines.append(calc)
+                lines.append("")
+            tp = primary_val.get("target_price", 0)
+            if tp:
+                lines.append(f"**主模型目标价: {tp:.2f}元**")
+                lines.append("")
+
+        # 情景分析表
+        scenario = vmeta.get("scenario_analysis")
+        if scenario and isinstance(scenario, dict):
+            lines.append("### 情景分析")
+            lines.append("")
+            lines.append("| 情景 | 概率 | 核心假设 | 触发条件 | PE | EPS | 目标价 | 较现价空间 |")
+            lines.append("|------|------|---------|---------|----|----|--------|----------|")
+            for label, key in [("保守", "conservative"), ("中性", "neutral"), ("乐观", "optimistic")]:
+                s = scenario.get(key, {})
+                if isinstance(s, dict):
+                    lines.append(
+                        f"| {label} "
+                        f"| {s.get('probability', '-')}% "
+                        f"| {s.get('assumptions', '-')[:40]} "
+                        f"| {s.get('trigger', s.get('trigger_conditions', '-'))[:30]} "
+                        f"| {s.get('pe', s.get('pe_assumption', '-'))} "
+                        f"| {s.get('eps', s.get('eps_forecast', '-'))} "
+                        f"| {s.get('target_price', '-')} "
+                        f"| {s.get('upside_pct', s.get('upside', '-'))}% |"
+                    )
+            lines.append("")
 
     # 各维度分析
     if signals:
@@ -252,6 +401,95 @@ def generate_report(state: dict[str, Any]) -> str:
         for risk in dict.fromkeys(all_risks):
             lines.append(f"- {risk}")
         lines.append("")
+
+    # === V2: 风险交叉验证矩阵 ===
+    risk_cv = fusion.risk_cross_validation if fusion.risk_cross_validation else None
+    op_strategy = fusion.operation_strategy if fusion.operation_strategy else None
+
+    if risk_cv and isinstance(risk_cv, list) and len(risk_cv) > 0:
+        lines.append("## 风险交叉验证")
+        lines.append("")
+        lines.append("| 风险 | 识别Agent | 确认状态 | 影响评估 | 缓解措施 |")
+        lines.append("|------|----------|---------|---------|---------|")
+        for r in risk_cv:
+            if isinstance(r, dict):
+                agents = ", ".join(r.get("identified_by", [])) if isinstance(r.get("identified_by"), list) else str(r.get("identified_by", "-"))
+                lines.append(
+                    f"| {r.get('risk', r.get('risk_description', '-'))} "
+                    f"| {agents} "
+                    f"| {r.get('status', r.get('confirmation_status', '-'))} "
+                    f"| {r.get('impact', r.get('impact_assessment', '-'))} "
+                    f"| {r.get('mitigation', '-')} |"
+                )
+        lines.append("")
+
+    # === V2: 操作策略 ===
+    if op_strategy and isinstance(op_strategy, dict):
+        lines.append("## 操作策略")
+        lines.append("")
+
+        # 建仓计划
+        entry = op_strategy.get("entry")
+        if entry and isinstance(entry, dict):
+            lines.append("### 建仓计划")
+            lines.append("")
+            lines.append("| 批次 | 价格 | 仓位 | 条件 |")
+            lines.append("|------|------|------|------|")
+            ip = entry.get("initial_price", 0)
+            ipp = entry.get("initial_position_pct", 0)
+            ic = entry.get("condition", "-")
+            if ip:
+                lines.append(f"| 首次建仓 | {ip:.2f} | {ipp}% | {ic} |")
+            scaling = entry.get("scaling", [])
+            if isinstance(scaling, list):
+                for i, s in enumerate(scaling, 1):
+                    if isinstance(s, dict):
+                        lines.append(
+                            f"| 第{i}次加仓 | {s.get('price', '-')} | {s.get('add_pct', '-')}% | {s.get('trigger', s.get('condition', '-'))} |"
+                        )
+            lines.append("")
+
+        # 止盈计划
+        tp_plan = op_strategy.get("take_profit")
+        if tp_plan and isinstance(tp_plan, list) and len(tp_plan) > 0:
+            lines.append("### 止盈计划")
+            lines.append("")
+            lines.append("| 目标 | 价格 | 减仓比例 | 依据 |")
+            lines.append("|------|------|---------|------|")
+            for i, t in enumerate(tp_plan, 1):
+                if isinstance(t, dict):
+                    lines.append(
+                        f"| 第{i}目标 | {t.get('target_price', '-')} | {t.get('reduce_pct', '-')}% | {t.get('basis', '-')} |"
+                    )
+            lines.append("")
+
+        # 止损规则
+        sl = op_strategy.get("stop_loss")
+        if sl and isinstance(sl, dict):
+            lines.append("### 止损规则")
+            lines.append("")
+            hsp = sl.get("hard_stop_price", 0)
+            hspc = sl.get("hard_stop_pct", 0)
+            if hsp:
+                lines.append(f"- **硬性止损**: {hsp:.2f}元（{hspc:+.1f}%），无条件执行")
+            cstops = sl.get("conditional_stops", [])
+            if isinstance(cstops, list):
+                for cs in cstops:
+                    if isinstance(cs, dict):
+                        lines.append(f"- **条件止损**: {cs.get('condition', '-')} → {cs.get('action', '-')}")
+            lines.append("")
+
+        # 短中期建议
+        st = op_strategy.get("short_term")
+        mt = op_strategy.get("mid_term")
+        if st or mt:
+            lines.append("### 操作建议")
+            lines.append("")
+            if st:
+                lines.append(f"- **短期（1-3月）**: {st}")
+            if mt:
+                lines.append(f"- **中期（6-12月）**: {mt}")
+            lines.append("")
 
     # LLM成本统计
     total_tokens = sum(s.llm_tokens_used for s in signals)

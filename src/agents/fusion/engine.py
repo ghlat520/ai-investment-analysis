@@ -260,6 +260,24 @@ def _llm_debate_fusion(
                 result["conflict_resolution"] = f
                 break
 
+        # V2: 提取丰富字段（风险交叉验证、操作策略、多空论据等）
+        raw = llm_result.get("raw_response") if isinstance(llm_result.get("raw_response"), dict) else {}
+        if raw:
+            if raw.get("bull_arguments"):
+                result["bull_arguments"] = raw["bull_arguments"]
+            if raw.get("bear_arguments"):
+                result["bear_arguments"] = raw["bear_arguments"]
+            if raw.get("divergence_points"):
+                result["divergence_points"] = raw["divergence_points"]
+            if raw.get("target_prices"):
+                result["target_prices"] = raw["target_prices"]
+            if raw.get("risk_cross_validation"):
+                result["risk_cross_validation"] = raw["risk_cross_validation"]
+            if raw.get("operation_strategy"):
+                result["operation_strategy"] = raw["operation_strategy"]
+            if raw.get("sub_scores"):
+                result["sub_scores"] = raw["sub_scores"]
+
     return result
 
 
@@ -375,6 +393,9 @@ def fuse_signals(
     final_bull_args = llm_result.get("bull_arguments", []) or bull_args
     final_bear_args = llm_result.get("bear_arguments", []) or bear_args
     divergence_points = llm_result.get("divergence_points", [])
+    risk_cross_validation = llm_result.get("risk_cross_validation", [])
+    operation_strategy = llm_result.get("operation_strategy", {})
+    sub_scores = llm_result.get("sub_scores", {})
 
     elapsed_ms = int((time.time() - start) * 1000)
     logger.info(
@@ -401,4 +422,7 @@ def fuse_signals(
         bear_arguments=tuple(final_bear_args),
         divergence_points=tuple(divergence_points),
         target_prices=target_prices if isinstance(target_prices, dict) else {},
+        risk_cross_validation=tuple(risk_cross_validation) if isinstance(risk_cross_validation, list) else (),
+        operation_strategy=operation_strategy if isinstance(operation_strategy, dict) else {},
+        sub_scores=sub_scores if isinstance(sub_scores, dict) else {},
     )

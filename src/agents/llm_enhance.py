@@ -172,6 +172,7 @@ def llm_enhance(
         "reasoning": code_reasoning,
         "extra_factors": [],
         "extra_risks": [],
+        "raw_response": {},
         "llm_model": "",
         "llm_tokens": 0,
         "llm_cost": 0.0,
@@ -242,6 +243,9 @@ def llm_enhance(
             result["enhanced"] = True
             result["reasoning"] = response.content[:500]
             return result
+
+        # 保存完整的LLM响应（供Agent提取新字段）
+        result["raw_response"] = parsed
 
         # 提取调整分数（限制范围）
         adj = parsed.get("score_adjustment", 0)
