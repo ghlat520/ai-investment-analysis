@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import datetime
 from typing import Any
 
 from loguru import logger
@@ -192,7 +192,7 @@ def _llm_enhance_report(state: dict[str, Any]) -> dict[str, Any]:
             template_vars={
                 "symbol": stock.symbol,
                 "name": stock.name,
-                "analysis_date": state.get("analysis_date", date.today().isoformat()),
+                "analysis_date": state.get("analysis_date", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
                 "report_context": _build_report_context(state),
             },
             code_score=fusion.final_score,
@@ -219,7 +219,7 @@ def generate_report(state: dict[str, Any]) -> str:
     stock = state.get("stock")
     fusion = state.get("fusion")
     signals = state.get("signals", [])
-    analysis_date = state.get("analysis_date", date.today().isoformat())
+    analysis_date = state.get("analysis_date", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     if stock is None or fusion is None:
         return "# 分析失败\n\n无法生成报告：缺少股票数据或融合决策。"

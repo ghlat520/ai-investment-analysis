@@ -12,7 +12,7 @@ DataLoader → [技术面|基本面|估值|资金面|情绪面|护城河|商业�
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +42,7 @@ def data_loader(state: dict[str, Any]) -> dict[str, Any]:
     logger.info(f"[DataLoader] Loading data for {symbol}")
     if stock is None:
         return {"errors": ["No stock data provided"]}
-    return {"analysis_date": date.today().isoformat()}
+    return {"analysis_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 
 def technical_analyst(state: dict[str, Any]) -> dict[str, Any]:
