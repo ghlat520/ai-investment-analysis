@@ -193,6 +193,8 @@ def analyze_moat(stock: StockData) -> AgentSignal:
     anchor_low = max(-100, anchor_score - 30)
     anchor_high = min(100, anchor_score + 30)
 
+    from src.research.extractor import get_research_context
+
     llm_result = llm_deep_analyze(
         agent_name="moat",
         template_name="moat.md",
@@ -205,6 +207,7 @@ def analyze_moat(stock: StockData) -> AgentSignal:
             "anchor_explanation": anchor_explanation,
             "anchor_score_low": str(anchor_low),
             "anchor_score_high": str(anchor_high),
+            "research_context": get_research_context(stock, "moat"),
         },
     )
 

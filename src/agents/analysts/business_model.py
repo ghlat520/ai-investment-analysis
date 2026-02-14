@@ -90,6 +90,8 @@ def analyze_business_model(stock: StockData) -> AgentSignal:
 
     business_context = _build_business_context(stock)
 
+    from src.research.extractor import get_research_context
+
     llm_result = llm_deep_analyze(
         agent_name="business_model",
         template_name="business_model.md",
@@ -98,6 +100,7 @@ def analyze_business_model(stock: StockData) -> AgentSignal:
             "name": stock.name,
             "analysis_date": date.today().isoformat(),
             "business_context": business_context,
+            "research_context": get_research_context(stock, "business_model"),
         },
     )
 

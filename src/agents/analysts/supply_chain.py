@@ -94,6 +94,8 @@ def analyze_supply_chain(stock: StockData) -> AgentSignal:
 
     supply_chain_context = _build_supply_chain_context(stock)
 
+    from src.research.extractor import get_research_context
+
     llm_result = llm_deep_analyze(
         agent_name="supply_chain",
         template_name="supply_chain.md",
@@ -102,6 +104,7 @@ def analyze_supply_chain(stock: StockData) -> AgentSignal:
             "name": stock.name,
             "analysis_date": date.today().isoformat(),
             "supply_chain_context": supply_chain_context,
+            "research_context": get_research_context(stock, "supply_chain"),
         },
     )
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="股票代码，如 300054.SZ")
     market: str = Field("A", description="市场：A/HK/US")
+    use_research: bool = Field(False, description="是否使用已上传的研报PDF")
 
 
 class TaskAccepted(BaseModel):

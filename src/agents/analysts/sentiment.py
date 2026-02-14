@@ -348,6 +348,7 @@ def analyze_sentiment(stock: StockData) -> AgentSignal:
 
     # --- LLM增强（核心 - 情绪面高度依赖LLM）---
     from ..llm_enhance import llm_enhance
+    from src.research.extractor import get_research_context
 
     llm_result = llm_enhance(
         agent_name="sentiment",
@@ -358,6 +359,7 @@ def analyze_sentiment(stock: StockData) -> AgentSignal:
             "analysis_date": date.today().isoformat(),
             "news_summary": _build_news_summary(news, component_scores),
             "news_content": _build_news_content(news),
+            "research_context": get_research_context(stock, "sentiment"),
         },
         code_score=code_score,
         code_reasoning=f"情绪面代码评分{code_score}。" + "；".join(factors),

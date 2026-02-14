@@ -22,6 +22,13 @@ from loguru import logger
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 
+class _SafeDict(dict):
+    """缺失 key 返回空字符串，避免 prompt 模板中有未传入的变量时崩溃"""
+
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
 def _load_prompt(template_name: str) -> str:
     """加载prompt模板"""
     path = _PROMPTS_DIR / template_name
@@ -200,7 +207,7 @@ def llm_enhance(
     try:
         template = _load_prompt(template_name)
         system_section, user_section = _parse_prompt_sections(template)
-        prompt = user_section.format(**template_vars)
+        prompt = user_section.format_map(_SafeDict(template_vars))
     except Exception as e:
         logger.warning(f"[{agent_name}] Prompt加载失败: {e}")
         return result
@@ -342,7 +349,7 @@ def llm_deep_analyze(
     try:
         template = _load_prompt(template_name)
         system_section, user_section = _parse_prompt_sections(template)
-        prompt = user_section.format(**template_vars)
+        prompt = user_section.format_map(_SafeDict(template_vars))
     except Exception as e:
         logger.warning(f"[{agent_name}] Prompt加载失败: {e}")
         return result

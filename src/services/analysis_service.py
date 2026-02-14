@@ -13,6 +13,51 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 
+_MAJOR_EVENT_KEYWORDS = (
+    "收购", "并购", "重组", "重大资产", "借壳", "合并",
+    "分拆", "剥离", "战略入股", "定向增发", "配股",
+    "股权转让", "实控人变更", "破产", "退市",
+)
+
+
+def _detect_data_lag_warnings(
+    news: list[dict],
+    biz_comp: list[dict],
+    warnings: list[str],
+    stock_name: str,
+) -> None:
+    """检测新闻中的重大事件与财报数据时效性矛盾，生成风险提示"""
+    if not news:
+        return
+
+    # 扫描新闻标题，匹配重大事件关键词
+    matched_events: list[str] = []
+    for item in news:
+        title = item.get("title", "")
+        for kw in _MAJOR_EVENT_KEYWORDS:
+            if kw in title:
+                matched_events.append(f"{kw}: {title[:60]}")
+                break  # 同一条新闻只匹配一次
+
+    if not matched_events:
+        return
+
+    # 取 business_composition 最新报告日期
+    biz_date = "未知"
+    if biz_comp:
+        dates = [str(item.get("report_date", ""))[:10] for item in biz_comp if item.get("report_date")]
+        if dates:
+            biz_date = max(dates)
+
+    event_list = "; ".join(matched_events[:3])
+    warnings.append(
+        f"⚠️ 重大事件预警: 近期新闻含[{event_list}]，"
+        f"但分业务营收数据截至{biz_date}，可能未反映最新业务变化。"
+        f"券商一致预期EPS可能已调整，但业务构成数据滞后，估值模型选择和分业务分析需审慎解读。"
+    )
+    logger.warning(f"[数据质量] {stock_name} 检测到重大事件与财报数据滞后矛盾: {event_list}")
+
+
 def _load_segment_model(symbol: str) -> dict | None:
     """从config/segment_models.yaml加载分业务线预测模型（如果有）"""
     from pathlib import Path
@@ -32,8 +77,13 @@ def _load_segment_model(symbol: str) -> dict | None:
         return None
 
 
-def collect_stock_data(symbol: str, market: str = "A"):
+def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None = None):
     """采集单只股票的全部数据
+
+    Args:
+        symbol: 股票代码
+        market: 市场（A/HK/US）
+        research_dir: 研报 PDF 目录路径（可选）
 
     Returns:
         StockData 实例
@@ -200,6 +250,24 @@ def collect_stock_data(symbol: str, market: str = "A"):
     if not valuation_data:
         data_warnings.append("估值历史数据缺失，百分位计算精度降低")
 
+    # 重大事件 vs 财报数据时效性矛盾检测
+    _detect_data_lag_warnings(
+        news_data, business_comp_data, data_warnings, stock_name,
+    )
+
+    # 9. 研报PDF解析（可选）
+    research_summaries: dict = {}
+    if research_dir:
+        try:
+            from src.research.extractor import extract_research_summaries, parse_research_pdfs
+
+            logger.info(f"[采集] 解析研报PDF: {research_dir}")
+            pdf_text = parse_research_pdfs(research_dir)
+            if pdf_text:
+                research_summaries = extract_research_summaries(pdf_text, symbol, stock_name)
+        except Exception as e:
+            logger.warning(f"[采集] 研报解析失败（非致命）: {e}")
+
     return StockData(
         symbol=symbol,
         name=stock_name,
@@ -214,6 +282,7 @@ def collect_stock_data(symbol: str, market: str = "A"):
             "business_composition": business_comp_data,
             "profit_forecast": profit_forecast_data,
             "segment_model": segment_model,
+            "research_summaries": research_summaries,
         },
     )
 

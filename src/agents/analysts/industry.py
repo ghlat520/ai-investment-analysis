@@ -78,6 +78,8 @@ def analyze_industry(stock: StockData) -> AgentSignal:
 
     industry_context = _build_industry_context(stock)
 
+    from src.research.extractor import get_research_context
+
     llm_result = llm_deep_analyze(
         agent_name="industry",
         template_name="industry.md",
@@ -86,6 +88,7 @@ def analyze_industry(stock: StockData) -> AgentSignal:
             "name": stock.name,
             "analysis_date": date.today().isoformat(),
             "industry_context": industry_context,
+            "research_context": get_research_context(stock, "industry"),
         },
     )
 

@@ -14,7 +14,7 @@ import json
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.services.task_queue import DuplicateTaskError, get_task_queue
@@ -54,8 +54,11 @@ def search_stocks(q: str = Query("", min_length=1, description="搜索关键词�
 )
 def trigger_analysis(request: AnalyzeRequest) -> JSONResponse:
     task_queue = get_task_queue()
+    research_dir = _get_research_dir(request.symbol) if request.use_research else None
     try:
-        task_info = task_queue.submit_task(symbol=request.symbol, market=request.market)
+        task_info = task_queue.submit_task(
+            symbol=request.symbol, market=request.market, research_dir=research_dir,
+        )
         return JSONResponse(
             status_code=202,
             content=TaskAccepted(
@@ -156,6 +159,45 @@ async def task_stream():
             "X-Accel-Buffering": "no",
         },
     )
+
+
+_RESEARCH_BASE_DIR = "/tmp/ai-invest-research"
+
+
+def _get_research_dir(symbol: str) -> str | None:
+    """获取股票的研报目录路径（如果存在）"""
+    import os
+
+    path = os.path.join(_RESEARCH_BASE_DIR, symbol.replace(".", "_"))
+    return path if os.path.isdir(path) else None
+
+
+@router.post("/research/upload", summary="上传研报PDF")
+async def upload_research(
+    symbol: str = Query(..., description="股票代码"),
+    files: list[UploadFile] = File(..., description="研报PDF文件"),
+) -> dict:
+    """上传研报PDF到临时目录，供后续分析使用"""
+    import os
+
+    upload_dir = os.path.join(_RESEARCH_BASE_DIR, symbol.replace(".", "_"))
+    os.makedirs(upload_dir, exist_ok=True)
+
+    saved = []
+    for f in files:
+        if not f.filename or not f.filename.lower().endswith(".pdf"):
+            continue
+        filepath = os.path.join(upload_dir, f.filename)
+        content = await f.read()
+        with open(filepath, "wb") as fout:
+            fout.write(content)
+        saved.append(f.filename)
+
+    return {
+        "symbol": symbol,
+        "uploaded": saved,
+        "research_dir": upload_dir,
+    }
 
 
 def _format_sse(event_type: str, data: dict[str, Any]) -> str:

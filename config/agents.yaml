@@ -131,3 +131,12 @@ agents:
     max_tokens: 8000
     timeout: 300
     prompt_template: prompts/report.md
+
+  research_extractor:
+    enabled: true
+    display_name: "研报PDF摘要提取"
+    llm_provider: ollama
+    llm_model: qwen2.5:14b
+    temperature: 0.2
+    max_tokens: 4000
+    timeout: 180

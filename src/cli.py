@@ -34,10 +34,10 @@ def main(debug: bool) -> None:
     _setup_logging("DEBUG" if debug else "INFO")
 
 
-def _collect_stock_data(symbol: str, market: str):
+def _collect_stock_data(symbol: str, market: str, research_dir: str | None = None):
     """采集单只股票的全部数据（委托给 service 层）"""
     from src.services.analysis_service import collect_stock_data
-    return collect_stock_data(symbol, market)
+    return collect_stock_data(symbol, market, research_dir=research_dir)
 
 
 # ─── analyze ───────────────────────────────────────────────
@@ -46,14 +46,17 @@ def _collect_stock_data(symbol: str, market: str):
 @click.option("--stock", required=True, help="股票代码（如 000001.SZ）")
 @click.option("--market", default="A", help="市场（A/HK/US）")
 @click.option("--notify", "do_notify", is_flag=True, help="分析后推送通知")
-def analyze(stock: str, market: str, do_notify: bool) -> None:
+@click.option("--research-dir", default=None, help="研报PDF目录路径（注入券商研报知识）")
+def analyze(stock: str, market: str, do_notify: bool, research_dir: str | None) -> None:
     """分析单只股票"""
     from src.agents.graph import compile_analysis_graph
 
     logger.info(f"开始分析: {stock} (market={market})")
+    if research_dir:
+        logger.info(f"[研报] 研报目录: {research_dir}")
     t0 = time.time()
 
-    stock_data = _collect_stock_data(stock, market)
+    stock_data = _collect_stock_data(stock, market, research_dir=research_dir)
 
     logger.info(f"[分析] 启动 LangGraph 分析流水线...")
     graph = compile_analysis_graph()

@@ -360,6 +360,7 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
 
     # --- LLM增强（可选，扩大范围至±40）---
     from ..llm_enhance import llm_enhance
+    from src.research.extractor import get_research_context
     from datetime import date
 
     llm_result = llm_enhance(
@@ -371,6 +372,7 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
             "analysis_date": date.today().isoformat(),
             "financial_summary": _build_financial_summary(df),
             "financial_trend": _build_financial_trend(df),
+            "research_context": get_research_context(stock, "fundamental"),
         },
         code_score=code_score,
         code_reasoning=f"基本面综合评分{code_score}。" + "；".join(all_factors),

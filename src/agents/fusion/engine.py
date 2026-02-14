@@ -226,6 +226,15 @@ def _llm_debate_fusion(
 
     from datetime import date
 
+    # 数据质量警告
+    data_warnings = stock.info.get("data_warnings", []) if stock and stock.info else []
+    warnings_text = ""
+    if data_warnings:
+        warnings_text = "\n\n### ⚠️ 数据质量风险提示\n"
+        for w in data_warnings:
+            warnings_text += f"- {w}\n"
+        warnings_text += "请在最终建议中明确提及以上数据局限性。\n"
+
     llm_result = llm_enhance(
         agent_name="fusion",
         template_name="fusion.md",
@@ -234,7 +243,7 @@ def _llm_debate_fusion(
             "name": name,
             "analysis_date": date.today().isoformat(),
             "code_score": str(code_score),
-            "signals_text": _build_signals_text(signals),
+            "signals_text": _build_signals_text(signals) + warnings_text,
             "conflicts_text": ", ".join(conflicts) if conflicts else "无矛盾",
         },
         code_score=code_score,

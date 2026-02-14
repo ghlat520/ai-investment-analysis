@@ -412,8 +412,18 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     # 分业务线前瞻估值上下文
     segment_context, segment_result = _build_segment_forecast_context(stock)
 
+    # 数据质量警告（注入LLM上下文，使其在分析中标红提示）
+    data_warnings = stock.info.get("data_warnings", [])
+    warnings_text = ""
+    if data_warnings:
+        warnings_text = "\n### ⚠️ 数据质量风险提示（必须在分析中明确标注）\n"
+        for w in data_warnings:
+            warnings_text += f"- {w}\n"
+        warnings_text += "\n请在reasoning和key_risks中明确提及以上数据局限性，提醒投资者注意。\n"
+
     # --- LLM增强（可选，扩大范围至±40）---
     from ..llm_enhance import llm_enhance
+    from src.research.extractor import get_research_context
     from datetime import date
 
     llm_result = llm_enhance(
@@ -427,7 +437,8 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
                 pe_ttm, pb, pe_pct, pb_pct, profit_yoy, val_days,
             ),
             "valuation_trend": _build_valuation_trend(val_df),
-            "segment_forecast_context": segment_context,
+            "segment_forecast_context": segment_context + warnings_text,
+            "research_context": get_research_context(stock, "valuation"),
         },
         code_score=code_score,
         code_reasoning=f"估值综合评分{code_score}（{val_days}天历史数据）。" + "；".join(all_factors),
@@ -465,6 +476,11 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     reasoning = llm_result["reasoning"]
     final_factors = all_factors + llm_result["extra_factors"]
     final_risks = list(all_risks) + llm_result["extra_risks"]
+
+    # 数据质量警告追加到风险列表（确保即使LLM忽略也能出现）
+    for w in data_warnings:
+        if "⚠️" in w:
+            final_risks.append(w)
 
     if llm_result["enhanced"]:
         confidence = min(1.0, confidence + 0.05)

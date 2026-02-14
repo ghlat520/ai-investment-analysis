@@ -20,6 +20,9 @@ dependencies = [
     "tushare>=1.4.0",
     "baostock>=0.8.0",
 
+    # PDF 解析
+    "pdfplumber>=0.11.0",
+
     # 数据处理
     "pandas>=2.2.0",
     "numpy>=1.26.0",
