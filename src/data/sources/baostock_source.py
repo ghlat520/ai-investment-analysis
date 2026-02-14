@@ -104,48 +104,6 @@ class BaoStockSource(BaseDataSource):
         return df[["symbol", "name", "market"]]
 
     def fetch_financial_data(self, symbol: str) -> pd.DataFrame:
-        bs_code = _to_bs_code(symbol)
-
-        with _bs_session() as bs:
-            # 盈利能力
-            profit_rs = bs.query_profit_data(code=bs_code, year=2025, quarter=3)
-            profit_rows = []
-            while (profit_rs.error_code == "0") & profit_rs.next():
-                profit_rows.append(profit_rs.get_row_data())
-
-            # 再拉最近4个季度
-            for y, q in [(2025, 2), (2025, 1), (2024, 4), (2024, 3)]:
-                rs = bs.query_profit_data(code=bs_code, year=y, quarter=q)
-                while (rs.error_code == "0") & rs.next():
-                    profit_rows.append(rs.get_row_data())
-
-            # 成长能力
-            growth_rs = bs.query_growth_data(code=bs_code, year=2024, quarter=4)
-            growth_rows = []
-            while (growth_rs.error_code == "0") & growth_rs.next():
-                growth_rows.append(growth_rs.get_row_data())
-
-        if not profit_rows:
-            return pd.DataFrame()
-
-        profit_df = pd.DataFrame(profit_rows, columns=profit_rs.fields)
-
-        # 去重
-        profit_df = profit_df.drop_duplicates(subset=["statDate"])
-
-        # 统一列名
-        records = []
-        for _, row in profit_df.iterrows():
-            rec = {
-                "report_date": row.get("statDate"),
-                "roe": pd.to_numeric(row.get("roeAvg"), errors="coerce"),
-                "gross_margin": pd.to_numeric(row.get("gpMargin"), errors="coerce"),
-                "net_margin": pd.to_numeric(row.get("npMargin"), errors="coerce"),
-                "revenue": pd.to_numeric(row.get("totalShare"), errors="coerce"),
-                "net_profit": pd.to_numeric(row.get("netProfit"), errors="coerce"),
-            }
-            records.append(rec)
-
-        df = pd.DataFrame(records)
-        logger.debug(f"[baostock] {symbol} 财务 {len(df)} 期")
-        return df
+        # BaoStock 财务数据不完整（缺 revenue_yoy/profit_yoy/debt_ratio/current_ratio/operating_cashflow），
+        # 交由 AKShare 处理，数据更全面。
+        raise NotImplementedError("baostock 财务数据不完整，使用 akshare 替代")

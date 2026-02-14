@@ -76,7 +76,10 @@ class AKShareSource(BaseDataSource):
         import akshare as ak
 
         try:
-            df = ak.stock_financial_analysis_indicator_em(symbol=symbol)
+            # API 需要带后缀格式，如 300054.SZ
+            code = symbol.split(".")[0]
+            suffix = ".SH" if code.startswith("6") else ".SZ"
+            df = ak.stock_financial_analysis_indicator_em(symbol=f"{code}{suffix}")
             if df.empty:
                 return df
 
@@ -106,13 +109,15 @@ class AKShareSource(BaseDataSource):
 
             # 财务健康
             result["debt_ratio"] = pd.to_numeric(df["ZCFZL"], errors="coerce")
-            result["current_ratio"] = pd.to_numeric(df.get("LD"), errors="coerce")
-            result["quick_ratio"] = pd.to_numeric(df.get("SD"), errors="coerce")
+            result["current_ratio"] = pd.to_numeric(df["LD"], errors="coerce")
+            result["quick_ratio"] = pd.to_numeric(df["SD"], errors="coerce")
 
             # 现金流
             result["operating_cashflow_per_share"] = pd.to_numeric(df["MGJYXJJE"], errors="coerce")
-            # 经营现金流/营收
-            result["cashflow_to_revenue"] = pd.to_numeric(df.get("JYXJLYYSR"), errors="coerce")
+            # 经营现金流/营收比（注意：此值是小数形式如 0.28，非百分比）
+            result["cashflow_to_revenue"] = pd.to_numeric(df["JYXJLYYSR"], errors="coerce")
+            # 经营现金流总额 = cashflow_to_revenue(小数) * revenue
+            result["operating_cashflow"] = result["cashflow_to_revenue"] * result["revenue"]
 
             # 按报告日期排序
             result = result.sort_values("report_date").reset_index(drop=True)

@@ -175,6 +175,7 @@ def _score_cash_quality(df: pd.DataFrame) -> tuple[int, list[str]]:
     ocf = latest.get("operating_cashflow")
     np_ = latest.get("net_profit")
 
+    # 主路径：经营现金流 / 净利润
     if ocf is not None and np_ is not None and not np.isnan(ocf) and not np.isnan(np_) and np_ > 0:
         ratio = ocf / np_
         if ratio > 1.0:
@@ -187,7 +188,24 @@ def _score_cash_quality(df: pd.DataFrame) -> tuple[int, list[str]]:
             score -= 8
             factors.append(f"经营现金流/净利润={ratio:.2f} 质量差")
     else:
-        factors.append("现金流数据不完整")
+        # 备用路径：cashflow_to_revenue（经营现金流/营收比，小数形式 0.28 = 28%）
+        ctr = latest.get("cashflow_to_revenue")
+        if ctr is not None and not np.isnan(ctr):
+            pct = ctr * 100  # 转为百分比展示
+            if ctr > 0.15:
+                score += 8
+                factors.append(f"经营现金流/营收={pct:.1f}% 质量优")
+            elif ctr > 0.05:
+                score += 3
+                factors.append(f"经营现金流/营收={pct:.1f}% 质量一般")
+            elif ctr > 0:
+                score += 0
+                factors.append(f"经营现金流/营收={pct:.1f}% 偏低")
+            else:
+                score -= 8
+                factors.append(f"经营现金流/营收={pct:.1f}% 现金流为负")
+        else:
+            factors.append("现金流数据不完整")
 
     return score, factors
 
