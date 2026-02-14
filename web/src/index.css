@@ -274,12 +274,13 @@ body {
 /* ============ 输入框样式 ============ */
 .input-terminal {
   width: 100%;
-  padding: 10px 14px;
-  border-radius: 8px;
+  padding: 12px 18px;
+  border-radius: 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 15px;
+  letter-spacing: 0.01em;
   outline: none;
   transition: all 0.2s ease;
 }
@@ -307,12 +308,12 @@ body {
   background: linear-gradient(135deg, var(--color-cyan) 0%, var(--color-cyan-dim) 100%);
   color: #000;
   font-weight: 600;
-  padding: 10px 20px;
-  border-radius: 8px;
+  padding: 12px 28px;
+  border-radius: 10px;
   border: none;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .btn-primary:hover {

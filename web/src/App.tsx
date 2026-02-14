@@ -189,7 +189,7 @@ function App() {
     <div className="min-h-screen flex flex-col bg-[var(--bg-base)]">
       {/* Header - top input bar */}
       <header className="flex-shrink-0 px-4 py-3 border-b border-white/5">
-        <div className="flex items-center justify-between">
+        <div className="max-w-[1440px] mx-auto w-full flex items-center justify-between">
           <StockInput isRunning={isAnalyzing} onAnalyze={handleAnalyze} />
           <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] ml-4">
             <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-danger)]'}`} />
@@ -199,7 +199,7 @@ function App() {
       </header>
 
       {/* Main content area */}
-      <main className="flex-1 flex overflow-hidden p-3 gap-3">
+      <main className="flex-1 flex overflow-hidden p-3 gap-3 max-w-[1440px] mx-auto w-full">
         {/* Left sidebar: tasks + history */}
         <div className="flex flex-col gap-3 w-72 flex-shrink-0 overflow-hidden">
           <TaskPanel tasks={activeTasks} />
@@ -235,7 +235,7 @@ function App() {
                   />
 
                   {/* Strategy points */}
-                  <StrategyPoints fusion={reportData.fusion} />
+                  <StrategyPoints fusion={reportData.fusion} signals={reportData.signals || []} />
 
                   {/* Agent progress (only during analysis) */}
                   <AgentProgressGrid agents={store.agents} visible={showAgentGrid} />

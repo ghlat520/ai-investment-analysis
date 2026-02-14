@@ -99,6 +99,7 @@ def get_history_detail(run_id: str) -> Optional[dict[str, Any]]:
                     "key_factors": s.key_factors,
                     "risks": s.risks,
                     "data_quality": float(s.data_quality) if s.data_quality else None,
+                    "extra_data": s.extra_data if s.extra_data else None,
                     "llm_model": s.llm_model,
                     "llm_tokens_used": s.llm_tokens_used,
                     "llm_cost": float(s.llm_cost) if s.llm_cost else None,

@@ -5,6 +5,7 @@ export interface AgentSignal {
   reasoning: string;
   key_factors: string[];
   risks: string[];
+  extra_data: Record<string, any> | null;
   llm_model: string;
   execution_time_ms: number;
 }

@@ -129,7 +129,7 @@ export default function StockInput({ isRunning, onAnalyze }: StockInputProps) {
     m === 'HK' ? 'text-[var(--color-danger)]' : m === 'US' ? 'text-[var(--color-cyan)]' : 'text-[var(--color-warning)]';
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 max-w-2xl">
+    <form onSubmit={handleSubmit} className="flex items-center gap-3 flex-1 max-w-3xl">
       <div className="relative flex-1" ref={dropdownRef}>
         <input
           type="text"
