@@ -36,16 +36,37 @@ def collect_stock_data(symbol: str, market: str = "A"):
     start_date = (date.today() - timedelta(days=365)).isoformat()
     stock_name = symbol
 
+    # 0. 股票名称（先查DB缓存，再查实时行情）
+    try:
+        from src.data.storage.database import get_database
+        from src.data.storage.models import StockInfo
+        db = get_database()
+        with db.session() as sess:
+            info = sess.query(StockInfo).filter_by(symbol=symbol).first()
+            if info and info.name and info.name != symbol and not info.name.endswith(('.SZ', '.SH', '.HK')):
+                stock_name = info.name
+    except Exception:
+        pass
+
+    if stock_name == symbol:
+        # DB没有有效名称，尝试从实时行情获取
+        try:
+            import akshare as ak
+            code = symbol.split(".")[0]
+            spot = ak.stock_zh_a_spot_em()
+            row = spot[spot["代码"] == code]
+            if not row.empty:
+                stock_name = str(row["名称"].iloc[0])
+                logger.info(f"[采集] 股票名称: {stock_name}")
+        except Exception as e:
+            logger.debug(f"[采集] 名称查询失败: {e}")
+
     # 1. 行情数据
     logger.info("[采集] 行情数据...")
     quotes_data: list[dict] = []
     try:
         quotes = source_mgr.fetch_daily_quotes(symbol, start_date, end_date)
         if not quotes.empty:
-            for col in ["股票名称", "name"]:
-                if col in quotes.columns and quotes[col].iloc[0]:
-                    stock_name = str(quotes[col].iloc[0])
-                    break
             quotes_data = quotes.to_dict("records")
             logger.info(f"[采集] 行情: {len(quotes_data)}条 ({stock_name})")
     except Exception as e:

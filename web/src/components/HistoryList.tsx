@@ -104,7 +104,9 @@ export default function HistoryList({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-1.5">
                       <span className="font-medium text-white truncate text-xs">
-                        {item.symbol}
+                        {item.stock_name && item.stock_name !== item.symbol
+                          ? `${item.stock_name} ${item.symbol}`
+                          : item.symbol}
                       </span>
                       <span
                         className="text-xs font-mono font-semibold px-1 py-0.5 rounded"

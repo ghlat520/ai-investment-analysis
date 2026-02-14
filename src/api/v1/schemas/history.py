@@ -10,6 +10,7 @@ from pydantic import BaseModel
 class HistoryItem(BaseModel):
     run_id: str
     symbol: str
+    stock_name: Optional[str] = None
     final_score: int
     final_action: str
     confidence: float
@@ -26,6 +27,7 @@ class HistoryListResponse(BaseModel):
 class HistoryDetailResponse(BaseModel):
     run_id: str
     symbol: str
+    stock_name: Optional[str] = None
     fusion: Optional[dict[str, Any]] = None
     signals: list[dict[str, Any]] = []
     report: Optional[str] = None

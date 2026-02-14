@@ -16,6 +16,7 @@ import ReportViewer from './components/ReportViewer';
 interface HistoryDetail {
   run_id: string;
   symbol: string;
+  stock_name: string | null;
   fusion: FusionDecision | null;
   signals: AgentSignal[];
   report: string;
@@ -181,7 +182,7 @@ function App() {
 
   // Report data from selected history or current analysis
   const reportData = (selectedReport ? toTaskResult(selectedReport) : null) || store.result;
-  const reportStockName = store.stockName || selectedReport?.symbol || store.currentSymbol || '';
+  const reportStockName = store.stockName || selectedReport?.stock_name || selectedReport?.symbol || store.currentSymbol || '';
   const reportSymbol = selectedReport?.symbol || store.currentSymbol || '';
   const reportCreatedAt = selectedReport?.created_at || undefined;
 

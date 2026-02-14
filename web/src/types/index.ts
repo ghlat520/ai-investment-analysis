@@ -70,6 +70,7 @@ export interface SSEAgentCompletedEvent {
 export interface HistoryItem {
   run_id: string;
   symbol: string;
+  stock_name: string | null;
   final_score: number;
   final_action: string;
   confidence: number;
