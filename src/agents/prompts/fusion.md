@@ -118,6 +118,8 @@
   "reasoning": "综合决策分析（400-600字），融合多空辩论过程、风险交叉验证结果和最终判断",
   "signal_consistency": "高度一致/基本一致/存在分歧/严重矛盾",
 
+  "conflict_resolution": "针对本股票信号矛盾的具体分析和裁决理由（150-200字），解释为何偏信某方",
+
   "bull_arguments": ["[来源Agent] 多方论据（附关键数据）"],
   "bear_arguments": ["[来源Agent] 空方论据（附关键数据）"],
   "divergence_points": ["分歧点：验证时间和方法"],

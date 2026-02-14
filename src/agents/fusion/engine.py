@@ -254,15 +254,12 @@ def _llm_debate_fusion(
         if llm_result["reasoning"]:
             result["reasoning"] = llm_result["reasoning"]
 
-        # 提取冲突解决方案
-        for f in llm_result["extra_factors"]:
-            if "矛盾" in f or "冲突" in f or "conflict" in f.lower():
-                result["conflict_resolution"] = f
-                break
-
         # V2: 提取丰富字段（风险交叉验证、操作策略、多空论据等）
         raw = llm_result.get("raw_response") if isinstance(llm_result.get("raw_response"), dict) else {}
         if raw:
+            # 优先从LLM raw_response提取个性化冲突解决方案
+            if raw.get("conflict_resolution"):
+                result["conflict_resolution"] = raw["conflict_resolution"]
             if raw.get("bull_arguments"):
                 result["bull_arguments"] = raw["bull_arguments"]
             if raw.get("bear_arguments"):
@@ -377,7 +374,15 @@ def fuse_signals(
     # 矛盾解决方案
     conflict_resolution = llm_result.get("conflict_resolution", "")
     if conflicts and not conflict_resolution:
-        conflict_resolution = "按加权权重融合，矛盾信号已通过置信度折扣反映在最终评分中"
+        # 构建有针对性的冲突说明（而非千篇一律）
+        bull_names = [f"{s.agent_name}({s.signal_score:+d})" for s in bullish[:3]]
+        bear_names = [f"{s.agent_name}({s.signal_score:+d})" for s in bearish[:3]]
+        conflict_resolution = (
+            f"多方（{', '.join(bull_names)}）与空方（{', '.join(bear_names)}）"
+            f"存在{len(conflicts)}处矛盾。"
+            f"按权重加权后偏向{'多方' if final_score > 0 else '空方' if final_score < 0 else '中性'}，"
+            f"置信度因矛盾折扣至{confidence:.0%}。建议关注矛盾焦点后续数据验证。"
+        )
 
     # 目标价（从LLM或valuation agent提取）
     target_prices = llm_result.get("target_prices", {})

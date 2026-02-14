@@ -13,6 +13,112 @@ from typing import Any
 from loguru import logger
 
 
+def _build_history_comparison(symbol: str, current_score: int, signals: list) -> list[str]:
+    """查询历史分析结果，生成评分变化趋势对比"""
+    try:
+        from src.data.storage.database import get_database
+        db = get_database()
+        with db.session() as session:
+            from sqlalchemy import text
+            # 获取该股票最近5次分析（不含当前）
+            rows = session.execute(
+                text(
+                    "SELECT f.run_id, f.final_score, f.final_action, f.confidence, "
+                    "f.created_at FROM fusion_decisions f "
+                    "WHERE f.symbol = :sym ORDER BY f.created_at DESC LIMIT 6"
+                ),
+                {"sym": symbol},
+            ).fetchall()
+
+            if len(rows) < 2:
+                return []  # 无历史数据可比
+
+            # 获取每次分析的Agent评分
+            run_ids = [r[0] for r in rows]
+            agent_rows = session.execute(
+                text(
+                    "SELECT run_id, agent_name, signal_score FROM analysis_results "
+                    "WHERE symbol = :sym AND run_id IN :runs ORDER BY created_at"
+                ).bindparams(sym=symbol),
+                {"runs": tuple(run_ids)},
+            ).fetchall()
+    except Exception:
+        # 如果SQL参数绑定失败，尝试简单查询
+        try:
+            from src.data.storage.database import get_database
+            db = get_database()
+            with db.session() as session:
+                from sqlalchemy import text
+                rows = session.execute(
+                    text(
+                        "SELECT run_id, final_score, final_action, confidence, created_at "
+                        "FROM fusion_decisions WHERE symbol = :sym "
+                        "ORDER BY created_at DESC LIMIT 6"
+                    ),
+                    {"sym": symbol},
+                ).fetchall()
+
+                if len(rows) < 2:
+                    return []
+
+                agent_rows = []
+                for r in rows:
+                    ar = session.execute(
+                        text(
+                            "SELECT run_id, agent_name, signal_score "
+                            "FROM analysis_results WHERE run_id = :rid"
+                        ),
+                        {"rid": r[0]},
+                    ).fetchall()
+                    agent_rows.extend(ar)
+        except Exception as e:
+            logger.debug(f"[Report] 历史查询失败: {e}")
+            return []
+
+    if len(rows) < 2:
+        return []
+
+    lines = ["## 历史分析对比", ""]
+
+    # 总分趋势表
+    lines.append("| 日期 | 综合评分 | 操作建议 | 置信度 | 评分变化 |")
+    lines.append("|------|---------|---------|--------|---------|")
+    prev_score = None
+    for row in reversed(rows):  # 按时间正序
+        run_id, score, action, conf, created_at = row
+        dt = str(created_at)[:16]
+        delta = ""
+        if prev_score is not None:
+            d = score - prev_score
+            delta = f"{d:+d}" if d != 0 else "→"
+        lines.append(f"| {dt} | {score:+d} | {action} | {conf:.0%} | {delta} |")
+        prev_score = score
+    lines.append("")
+
+    # Agent维度变化（对比最新两次）
+    if len(rows) >= 2 and agent_rows:
+        latest_run = rows[0][0]
+        prev_run = rows[1][0]
+        latest_agents = {r[1]: r[2] for r in agent_rows if r[0] == latest_run}
+        prev_agents = {r[1]: r[2] for r in agent_rows if r[0] == prev_run}
+        common = set(latest_agents) & set(prev_agents)
+        if common:
+            lines.append("### 各维度评分变化（最近两次）")
+            lines.append("")
+            lines.append("| 维度 | 上次 | 本次 | 变化 |")
+            lines.append("|------|------|------|------|")
+            for agent in sorted(common):
+                prev_s = prev_agents[agent]
+                curr_s = latest_agents[agent]
+                d = curr_s - prev_s
+                display = _AGENT_DISPLAY.get(agent, agent)
+                arrow = "↑" if d > 0 else "↓" if d < 0 else "→"
+                lines.append(f"| {display} | {prev_s:+d} | {curr_s:+d} | {d:+d} {arrow} |")
+            lines.append("")
+
+    return lines
+
+
 def _action_to_stars(score: int) -> str:
     """分数转星级评级"""
     if score >= 60:
@@ -142,26 +248,49 @@ def generate_report(state: dict[str, Any]) -> str:
         "",
     ]
 
-    # 目标价
-    if fusion.target_prices:
-        tp = fusion.target_prices
+    # 目标价（优先用估值Agent的计算结果，有推导过程可追溯）
+    valuation_tp = {}
+    valuation_signal = next((s for s in signals if s.agent_name == "valuation"), None)
+    if valuation_signal and isinstance(valuation_signal.metadata, dict):
+        vtp = valuation_signal.metadata.get("target_prices", {})
+        if isinstance(vtp, dict):
+            valuation_tp = vtp
+    fusion_tp = fusion.target_prices or {}
+
+    # 取有效的目标价源（估值Agent优先，fusion补充）
+    tp = valuation_tp if any(v > 0 for v in valuation_tp.values()) else fusion_tp
+    if tp:
         conservative = tp.get("conservative", 0)
-        base = tp.get("base", 0)
+        base = tp.get("base", tp.get("neutral", 0))
         optimistic = tp.get("optimistic", 0)
         if any(v > 0 for v in [conservative, base, optimistic]):
             lines.append("## 目标价")
             lines.append("")
-            lines.append(f"| 情景 | 目标价 |")
-            lines.append(f"|------|--------|")
+            lines.append("| 情景 | 目标价 | 来源 |")
+            lines.append("|------|--------|------|")
+            src = "估值模型" if tp is valuation_tp else "融合裁定"
             if conservative > 0:
-                lines.append(f"| 保守 | {conservative:.2f}元 |")
+                lines.append(f"| 保守 | {conservative:.2f}元 | {src} |")
             if base > 0:
-                lines.append(f"| 中性 | {base:.2f}元 |")
+                lines.append(f"| 中性 | {base:.2f}元 | {src} |")
             if optimistic > 0:
-                lines.append(f"| 乐观 | {optimistic:.2f}元 |")
+                lines.append(f"| 乐观 | {optimistic:.2f}元 | {src} |")
             pw = tp.get("probability_weighted", 0)
             if pw > 0:
-                lines.append(f"| 概率加权 | {pw:.2f}元 |")
+                lines.append(f"| 概率加权 | {pw:.2f}元 | {src} |")
+            # 如果两个来源不一致，标注差异
+            if valuation_tp and fusion_tp and tp is valuation_tp:
+                f_base = fusion_tp.get("base", fusion_tp.get("neutral", 0))
+                v_base = base
+                if f_base > 0 and v_base > 0 and abs(f_base - v_base) / v_base > 0.1:
+                    lines.append("")
+                    lines.append(
+                        f"> 注：融合层裁定目标价为"
+                        f"{fusion_tp.get('conservative', 0):.2f}/"
+                        f"{f_base:.2f}/"
+                        f"{fusion_tp.get('optimistic', 0):.2f}元，"
+                        f"与估值模型存在偏差，以估值Agent计算结果为主参考。"
+                    )
             lines.append("")
 
     # 核心逻辑
@@ -391,16 +520,32 @@ def generate_report(state: dict[str, Any]) -> str:
             lines.append(f"- **解决方案**: {fusion.conflict_resolution}")
         lines.append("")
 
-    # 风险提示
+    # 风险提示（去重+过滤垃圾项）
     all_risks = []
     for signal in signals:
         all_risks.extend(signal.risks)
     if all_risks:
-        lines.append("## 风险提示")
-        lines.append("")
-        for risk in dict.fromkeys(all_risks):
-            lines.append(f"- {risk}")
-        lines.append("")
+        seen = set()
+        clean_risks = []
+        for risk in all_risks:
+            r = str(risk).strip().rstrip("。.")
+            # 过滤垃圾项：太短、占位符、纯标签
+            if len(r) < 5:
+                continue
+            if r.startswith("附[") or r.startswith("[来源") or r == "附[来源]":
+                continue
+            # 归一化去重（忽略末尾标点和"关注"前缀）
+            norm = r.replace("关注", "").replace("注意", "").strip()
+            if norm in seen:
+                continue
+            seen.add(norm)
+            clean_risks.append(r)
+        if clean_risks:
+            lines.append("## 风险提示")
+            lines.append("")
+            for risk in clean_risks[:15]:  # 最多15条，避免信息过载
+                lines.append(f"- {risk}")
+            lines.append("")
 
     # === V2: 风险交叉验证矩阵 ===
     risk_cv = fusion.risk_cross_validation if fusion.risk_cross_validation else None
@@ -490,6 +635,14 @@ def generate_report(state: dict[str, Any]) -> str:
             if mt:
                 lines.append(f"- **中期（6-12月）**: {mt}")
             lines.append("")
+
+    # === V2: 历史分析对比 ===
+    try:
+        history_lines = _build_history_comparison(symbol, fusion.final_score, signals)
+        if history_lines:
+            lines.extend(history_lines)
+    except Exception as e:
+        logger.debug(f"[Report] 历史对比跳过: {e}")
 
     # LLM成本统计
     total_tokens = sum(s.llm_tokens_used for s in signals)
