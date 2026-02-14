@@ -8,12 +8,14 @@ import HistoryList from './components/HistoryList';
 import TaskPanel from './components/TaskPanel';
 import ReportOverview from './components/ReportOverview';
 import StrategyPoints from './components/StrategyPoints';
+import SignalTable from './components/SignalTable';
 import BullBearDebate from './components/BullBearDebate';
 import AgentProgressGrid from './components/AgentProgressGrid';
 import ReportViewer from './components/ReportViewer';
 import HotspotView from './components/hotspot/HotspotView';
 
 type TabType = 'analysis' | 'hotspot';
+type DetailTab = 'bullbear' | 'report' | 'errors';
 
 // API returns flat structure, not wrapped in `result`
 interface HistoryDetail {
@@ -61,6 +63,9 @@ function App() {
   const [selectedReport, setSelectedReport] = useState<HistoryDetail | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
   const [isLoadingReport, setIsLoadingReport] = useState(false);
+
+  // Detail tabs state
+  const [detailTab, setDetailTab] = useState<DetailTab>('bullbear');
 
   // Active tasks (from SSE)
   const [activeTasks, setActiveTasks] = useState<TaskInfo[]>([]);
@@ -285,24 +290,68 @@ function App() {
                     {/* Agent progress (only during analysis) */}
                     <AgentProgressGrid agents={store.agents} visible={showAgentGrid} />
 
-                    {/* Bull vs Bear */}
-                    <BullBearDebate fusion={reportData.fusion} />
+                    {/* Signal table (after analysis complete) */}
+                    {!showAgentGrid && reportData.signals && reportData.signals.length > 0 && (
+                      <SignalTable signals={reportData.signals} weights={reportData.fusion.weights_used || {}} />
+                    )}
+
+                    {/* Detail tabs: BullBear / Report / Errors */}
+                    {(() => {
+                      const hasBullBear = reportData.fusion.bull_arguments.length > 0 || reportData.fusion.bear_arguments.length > 0;
+                      const hasReport = !!reportData.report;
+                      const hasErrors = reportData.errors && reportData.errors.length > 0;
+                      const tabs: { key: DetailTab; label: string; show: boolean }[] = [
+                        { key: 'bullbear', label: '多空论点', show: hasBullBear },
+                        { key: 'report', label: '研报详情', show: hasReport },
+                        { key: 'errors', label: '分析日志', show: !!hasErrors },
+                      ];
+                      const visibleTabs = tabs.filter((t) => t.show);
+                      if (visibleTabs.length === 0) return null;
+                      // Auto-select first visible tab if current is hidden
+                      const currentVisible = visibleTabs.some((t) => t.key === detailTab);
+                      const activeDetailTab = currentVisible ? detailTab : visibleTabs[0].key;
+                      return (
+                        <div className="terminal-card animate-slide-up">
+                          <div className="px-5 pt-4 pb-0">
+                            <div className="flex flex-wrap gap-1 pb-0 -mb-px">
+                              {visibleTabs.map((tab) => (
+                                <button
+                                  key={tab.key}
+                                  type="button"
+                                  onClick={() => setDetailTab(tab.key)}
+                                  className={`px-3 py-2 text-xs font-medium whitespace-nowrap rounded-t-lg transition-all border-b-2 ${
+                                    activeDetailTab === tab.key
+                                      ? 'text-[var(--color-cyan)] border-[var(--color-cyan)] bg-[var(--bg-elevated)]'
+                                      : 'text-[var(--text-muted)] border-transparent hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/50'
+                                  }`}
+                                >
+                                  {tab.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="border-t border-white/5" />
+                          <div className="p-5">
+                            {activeDetailTab === 'bullbear' && hasBullBear && (
+                              <BullBearDebate fusion={reportData.fusion} />
+                            )}
+                            {activeDetailTab === 'report' && hasReport && (
+                              <ReportViewer report={reportData.report} />
+                            )}
+                            {activeDetailTab === 'errors' && hasErrors && (
+                              <div>
+                                <ul className="text-xs text-[var(--text-muted)] space-y-1">
+                                  {reportData.errors.map((err, i) => (
+                                    <li key={i}>{err}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </>
-                )}
-
-                {/* Full report */}
-                {reportData.report && <ReportViewer report={reportData.report} />}
-
-                {/* Errors */}
-                {reportData.errors && reportData.errors.length > 0 && (
-                  <div className="terminal-card p-4 border-[var(--color-danger)]/30">
-                    <h4 className="text-sm font-medium text-[var(--color-danger)] mb-2">分析过程中的错误</h4>
-                    <ul className="text-xs text-[var(--text-muted)] space-y-1">
-                      {reportData.errors.map((err, i) => (
-                        <li key={i}>{err}</li>
-                      ))}
-                    </ul>
-                  </div>
                 )}
               </div>
             ) : showAgentGrid ? (

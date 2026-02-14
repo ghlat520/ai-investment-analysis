@@ -10,9 +10,8 @@ export default function BullBearDebate({ fusion }: BullBearDebateProps) {
   if (!bull_arguments.length && !bear_arguments.length) return null;
 
   return (
-    <div className="terminal-card p-5 animate-slide-up">
-      <span className="label-uppercase">BULL vs BEAR 多空论点</span>
-      <div className="grid grid-cols-2 gap-4 mt-3">
+    <div>
+      <div className="grid grid-cols-2 gap-4">
         {/* Bull */}
         <div className="rounded-lg border border-[var(--color-bull)]/20 bg-[var(--color-bull)]/5 p-4">
           <div className="flex items-center gap-2 mb-3">

@@ -1,4 +1,5 @@
 import type { TaskInfo } from '../types';
+import { getEastMoneyUrl } from '../utils/stockLink';
 
 function TaskItem({ task }: { task: TaskInfo }) {
   const isPending = task.status === 'pending';
@@ -24,7 +25,18 @@ function TaskItem({ task }: { task: TaskInfo }) {
           <span className="text-sm font-medium text-white truncate">
             {task.stock_name || task.symbol}
           </span>
-          <span className="text-xs text-[var(--text-muted)]">{task.symbol}</span>
+          <a
+            href={getEastMoneyUrl(task.symbol, task.market)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-[var(--text-muted)] hover:text-[var(--color-cyan)] transition-colors"
+            title="在东方财富查看行情"
+          >
+            {task.symbol}
+            <svg className="w-2.5 h-2.5 inline ml-0.5 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
         </div>
         {task.message && (
           <p className="text-xs text-[var(--text-secondary)] truncate mt-0.5">{task.message}</p>

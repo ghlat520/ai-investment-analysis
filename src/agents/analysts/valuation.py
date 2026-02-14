@@ -113,6 +113,180 @@ def _build_valuation_summary(
     return "\n".join(lines) if lines else "无估值数据"
 
 
+def _calc_from_yaml(yaml_model: dict) -> dict:
+    """从YAML精细预测模型计算各年净利润/EPS/目标价"""
+    segments = yaml_model.get("segments", [])
+    period_costs = yaml_model.get("period_costs", {})
+    total_shares_b = yaml_model.get("total_shares_billion", 1.0)
+    pe_assumption = yaml_model.get("pe_assumption", {})
+
+    # 收集所有预测年份
+    years = set()
+    for seg in segments:
+        years.update(seg.get("projections", {}).keys())
+    years = sorted(years)
+
+    yearly = []
+    for year in years:
+        gross_profit = 0.0
+        segment_details = []
+        for seg in segments:
+            rev = seg.get("projections", {}).get(year, 0)
+            margin = seg.get("margin_pct", 0) / 100.0
+            gp = rev * margin
+            gross_profit += gp
+            segment_details.append({
+                "name": seg["name"],
+                "revenue": rev,
+                "margin_pct": seg.get("margin_pct", 0),
+                "gross_profit": round(gp, 2),
+            })
+
+        cost = period_costs.get(year, 0)
+        net_profit = gross_profit - cost
+        # net_profit单位=亿元, total_shares_b单位=十亿股, 需转为亿股
+        total_shares_yi = total_shares_b * 10
+        eps = net_profit / total_shares_yi if total_shares_yi > 0 else 0
+
+        # PE取值
+        pe = _get_segment_weighted_pe(segments, year, pe_assumption)
+        target_price = eps * pe
+
+        yearly.append({
+            "year": year,
+            "total_revenue": round(sum(s["revenue"] for s in segment_details), 2),
+            "gross_profit": round(gross_profit, 2),
+            "period_cost": cost,
+            "net_profit": round(net_profit, 2),
+            "eps": round(eps, 2),
+            "pe": pe,
+            "target_price": round(target_price, 2),
+            "segments": segment_details,
+        })
+
+    return {
+        "source": "yaml_model",
+        "data_source": yaml_model.get("data_source", "用户自有研究"),
+        "last_updated": yaml_model.get("last_updated", ""),
+        "total_shares_billion": total_shares_b,
+        "yearly_forecast": yearly,
+    }
+
+
+def _get_segment_weighted_pe(segments: list, year: int, pe_assumption: dict) -> float:
+    """计算分业务加权PE"""
+    method = pe_assumption.get("method", "fixed")
+    if method == "segment_weighted":
+        segments_pe = pe_assumption.get("segments_pe", {})
+        total_rev = 0.0
+        weighted_pe = 0.0
+        for seg in segments:
+            rev = seg.get("projections", {}).get(year, 0)
+            # 匹配PE：按segment名称关键词匹配
+            seg_pe = _match_segment_pe(seg["name"], segments_pe)
+            weighted_pe += rev * seg_pe
+            total_rev += rev
+        return round(weighted_pe / total_rev, 1) if total_rev > 0 else 30.0
+    return pe_assumption.get("pe", 30.0)
+
+
+def _match_segment_pe(seg_name: str, segments_pe: dict) -> float:
+    """根据业务线名称匹配PE倍数"""
+    for keyword, pe in segments_pe.items():
+        if keyword in seg_name:
+            return pe
+    # 默认PE
+    return 20.0
+
+
+def _build_auto_context(biz_comp: list[dict], forecast: list[dict]) -> dict:
+    """用API数据构建分业务上下文（无YAML时的自动模式）"""
+    result = {"source": "auto_api", "yearly_forecast": []}
+    parts = []
+
+    if biz_comp:
+        parts.append("### 分业务/分产品营收构成（最新报告期）")
+        parts.append("| 产品/业务 | 营收(元) | 占比 | 毛利率 | 分类 |")
+        parts.append("|----------|---------|------|--------|------|")
+        for item in biz_comp[:15]:
+            parts.append(
+                f"| {item.get('product', '-')} "
+                f"| {item.get('revenue', '-')} "
+                f"| {item.get('revenue_pct', '-')}% "
+                f"| {item.get('gross_margin', '-')}% "
+                f"| {item.get('classification', '-')} |"
+            )
+
+    if forecast:
+        parts.append("\n### 券商盈利预测（一致预期EPS）")
+        parts.append("| 年度 | 机构数 | EPS最低 | EPS均值 | EPS最高 | 行业均值 |")
+        parts.append("|------|-------|--------|--------|--------|---------|")
+        for item in forecast[:5]:
+            parts.append(
+                f"| {item.get('year', '-')} "
+                f"| {item.get('num_institutions', '-')} "
+                f"| {item.get('eps_min', '-')} "
+                f"| {item.get('eps_mean', '-')} "
+                f"| {item.get('eps_max', '-')} "
+                f"| {item.get('industry_avg', '-')} |"
+            )
+
+    result["context_text"] = "\n".join(parts) if parts else ""
+    return result
+
+
+def _build_segment_forecast_context(stock: StockData) -> tuple[str, dict]:
+    """构建分业务线前瞻估值上下文
+
+    Returns:
+        (context_text, segment_result) — 文本注入LLM + 结构化数据存metadata
+    """
+    yaml_model = stock.info.get("segment_model")
+    biz_comp = stock.info.get("business_composition", [])
+    forecast = stock.info.get("profit_forecast", [])
+
+    if yaml_model:
+        # YAML精确计算模式
+        segment_result = _calc_from_yaml(yaml_model)
+        yearly = segment_result.get("yearly_forecast", [])
+
+        lines = [
+            "### 分业务线前瞻盈利预测（YAML精细模型，代码已算好）",
+            f"数据来源: {segment_result.get('data_source', '用户研究')}",
+            f"总股本: {segment_result.get('total_shares_billion', 0)}亿股",
+            "",
+            "| 年份 | 总营收(亿) | 毛利(亿) | 期间费用(亿) | 净利润(亿) | EPS(元) | PE | 目标价(元) |",
+            "|------|----------|---------|------------|----------|---------|----|---------:|",
+        ]
+        for y in yearly:
+            lines.append(
+                f"| {y['year']} | {y['total_revenue']} | {y['gross_profit']} "
+                f"| {y['period_cost']} | {y['net_profit']} | {y['eps']} "
+                f"| {y['pe']} | {y['target_price']} |"
+            )
+
+        # 各业务线明细（取最后一年展示）
+        if yearly:
+            last = yearly[-1]
+            lines.append(f"\n#### {last['year']}年各业务线明细")
+            lines.append("| 业务线 | 营收(亿) | 毛利率 | 毛利(亿) |")
+            lines.append("|--------|---------|--------|---------|")
+            for seg in last["segments"]:
+                lines.append(
+                    f"| {seg['name']} | {seg['revenue']} | {seg['margin_pct']}% | {seg['gross_profit']} |"
+                )
+
+        lines.append("\n**【铁律】以上净利润/EPS/目标价已由代码精确计算。你必须直接引用这些目标价填入target_prices字段（第1年=conservative，第2年=base，最后1年=optimistic），严禁自行用PEG/DCF等公式重新计算目标价。你的任务仅限于：(1)验证各业务线增速假设是否合理 (2)识别假设过于乐观/保守的风险 (3)与券商一致预期交叉对比偏差。**")
+        return "\n".join(lines), segment_result
+
+    elif biz_comp or forecast:
+        # 自动API模式
+        segment_result = _build_auto_context(biz_comp, forecast)
+        return segment_result.get("context_text", ""), segment_result
+
+    return "", {}
+
+
 def _build_valuation_trend(val_df: pd.DataFrame) -> str:
     """构建估值历史趋势（近6个月月度快照）"""
     if val_df.empty or "date" not in val_df.columns:
@@ -235,6 +409,9 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     pe_pct = _calc_percentile(positive_pe, pe_ttm) if not np.isnan(pe_ttm) and pe_ttm > 0 and len(positive_pe) > 0 else None
     pb_pct = _calc_percentile(positive_pb, pb) if not np.isnan(pb) and pb > 0 and len(positive_pb) > 0 else None
 
+    # 分业务线前瞻估值上下文
+    segment_context, segment_result = _build_segment_forecast_context(stock)
+
     # --- LLM增强（可选，扩大范围至±40）---
     from ..llm_enhance import llm_enhance
     from datetime import date
@@ -250,6 +427,7 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
                 pe_ttm, pb, pe_pct, pb_pct, profit_yoy, val_days,
             ),
             "valuation_trend": _build_valuation_trend(val_df),
+            "segment_forecast_context": segment_context,
         },
         code_score=code_score,
         code_reasoning=f"估值综合评分{code_score}（{val_days}天历史数据）。" + "；".join(all_factors),
@@ -259,6 +437,28 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
 
     # 提取LLM丰富字段（V2: 模型选择、情景分析、因子表等）
     raw = llm_result.get("raw_response") if isinstance(llm_result.get("raw_response"), dict) else {}
+
+    # YAML精确目标价覆写LLM（代码计算 > LLM猜测）
+    if segment_result and segment_result.get("source") == "yaml_model":
+        yearly = segment_result.get("yearly_forecast", [])
+        if len(yearly) >= 2:
+            # 最近年=保守, 中间年=中性, 最远年=乐观
+            code_targets = {
+                "conservative": yearly[0]["target_price"],
+                "base": yearly[1]["target_price"],
+                "optimistic": yearly[-1]["target_price"],
+                "probability_weighted": round(
+                    yearly[0]["target_price"] * 0.3
+                    + yearly[1]["target_price"] * 0.4
+                    + yearly[-1]["target_price"] * 0.3, 2
+                ),
+            }
+            raw["target_prices"] = code_targets
+            logger.info(
+                f"[valuation] YAML目标价覆写LLM: "
+                f"保守={code_targets['conservative']}, 中性={code_targets['base']}, "
+                f"乐观={code_targets['optimistic']}"
+            )
 
     # 合并LLM结果
     signal_score = max(-100, min(100, code_score + llm_result["score_adjustment"]))
@@ -306,6 +506,7 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
             "secondary_valuation": raw.get("secondary_valuation"),
             "trap_detection": raw.get("trap_detection"),
             "target_prices": raw.get("target_prices", {}),
+            "segment_forecast": segment_result if segment_result else None,
         },
         execution_time_ms=elapsed_ms,
     )

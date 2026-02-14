@@ -413,6 +413,51 @@ def generate_report(state: dict[str, Any]) -> str:
                         )
             lines.append("")
 
+    # === 分业务线前瞻估值 ===
+    valuation_signal_for_seg = next((s for s in signals if s.agent_name == "valuation"), None)
+    if valuation_signal_for_seg and isinstance(valuation_signal_for_seg.metadata, dict):
+        seg_forecast = valuation_signal_for_seg.metadata.get("segment_forecast")
+        if seg_forecast and isinstance(seg_forecast, dict):
+            yearly = seg_forecast.get("yearly_forecast", [])
+            if yearly:
+                lines.append("## 分业务线前瞻估值")
+                lines.append("")
+                lines.append(f"- **数据来源**: {seg_forecast.get('data_source', seg_forecast.get('source', 'API'))}")
+                if seg_forecast.get("last_updated"):
+                    lines.append(f"- **更新日期**: {seg_forecast['last_updated']}")
+                lines.append("")
+                lines.append("| 年份 | 总营收(亿) | 毛利(亿) | 期间费用(亿) | 净利润(亿) | EPS(元) | PE | 目标价(元) |")
+                lines.append("|------|----------|---------|------------|----------|---------|----|---------:|")
+                for y in yearly:
+                    lines.append(
+                        f"| {y.get('year', '-')} "
+                        f"| {y.get('total_revenue', '-')} "
+                        f"| {y.get('gross_profit', '-')} "
+                        f"| {y.get('period_cost', '-')} "
+                        f"| {y.get('net_profit', '-')} "
+                        f"| {y.get('eps', '-')} "
+                        f"| {y.get('pe', '-')} "
+                        f"| {y.get('target_price', '-')} |"
+                    )
+                lines.append("")
+
+                # 末年业务线明细
+                last_year = yearly[-1]
+                segs = last_year.get("segments", [])
+                if segs:
+                    lines.append(f"### {last_year.get('year', '')}年各业务线明细")
+                    lines.append("")
+                    lines.append("| 业务线 | 营收(亿) | 毛利率 | 毛利(亿) |")
+                    lines.append("|--------|---------|--------|---------|")
+                    for seg in segs:
+                        lines.append(
+                            f"| {seg.get('name', '-')} "
+                            f"| {seg.get('revenue', '-')} "
+                            f"| {seg.get('margin_pct', '-')}% "
+                            f"| {seg.get('gross_profit', '-')} |"
+                        )
+                    lines.append("")
+
     # === V2: 估值深度分析（模型选择、计算过程、情景分析）===
     valuation_signal = next((s for s in signals if s.agent_name == "valuation"), None)
     if valuation_signal and isinstance(valuation_signal.metadata, dict):

@@ -1,5 +1,6 @@
 import { useRef, useCallback, useEffect } from 'react';
 import type { HistoryItem } from '../types';
+import { getEastMoneyUrl } from '../utils/stockLink';
 
 interface HistoryListProps {
   items: HistoryItem[];
@@ -91,7 +92,7 @@ export default function HistoryList({
                 key={item.run_id}
                 type="button"
                 onClick={() => onItemClick(item.run_id)}
-                className={`history-item w-full text-left ${selectedRunId === item.run_id ? 'active' : ''}`}
+                className={`history-item w-full text-left group ${selectedRunId === item.run_id ? 'active' : ''}`}
               >
                 <div className="flex items-center gap-2 w-full">
                   <span
@@ -105,9 +106,21 @@ export default function HistoryList({
                     <div className="flex items-center justify-between gap-1.5">
                       <span className="font-medium text-white truncate text-xs">
                         {item.stock_name && item.stock_name !== item.symbol
-                          ? `${item.stock_name} ${item.symbol}`
+                          ? item.stock_name
                           : item.symbol}
                       </span>
+                      <a
+                        href={getEastMoneyUrl(item.symbol)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-shrink-0 text-[var(--color-cyan)] opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                        title="在东方财富查看行情"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                      </a>
                       <span
                         className="text-xs font-mono font-semibold px-1 py-0.5 rounded"
                         style={{

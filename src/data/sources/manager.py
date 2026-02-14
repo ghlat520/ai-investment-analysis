@@ -123,6 +123,14 @@ class DataSourceManager:
                     raise
         return pd.DataFrame()
 
+    def fetch_business_composition(self, symbol: str) -> pd.DataFrame:
+        """获取分业务/分产品营收构成"""
+        return self._call_with_fallback("fetch_business_composition", symbol=symbol)
+
+    def fetch_profit_forecast(self, symbol: str) -> pd.DataFrame:
+        """获取券商盈利预测/一致预期"""
+        return self._call_with_fallback("fetch_profit_forecast", symbol=symbol)
+
     def fetch_batch_financial(self, report_date: str = "") -> pd.DataFrame:
         """获取全市场批量财务数据"""
         return self._call_with_fallback("fetch_batch_financial", report_date=report_date)

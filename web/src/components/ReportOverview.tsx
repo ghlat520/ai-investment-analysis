@@ -1,5 +1,6 @@
 import type { FusionDecision } from '../types';
 import ScoreGauge from './ScoreGauge';
+import { getEastMoneyUrl } from '../utils/stockLink';
 
 interface ReportOverviewProps {
   fusion: FusionDecision;
@@ -42,9 +43,19 @@ export default function ReportOverview({ fusion, stockName, symbol, createdAt }:
                     <h2 className="text-2xl font-bold text-white">{stockName || symbol}</h2>
                   </div>
                   <div className="flex items-center gap-2 mt-1.5">
-                    <span className="font-mono text-xs text-[var(--color-cyan)] bg-[var(--color-cyan)]/10 px-1.5 py-0.5 rounded">
+                    <a
+                      href={getEastMoneyUrl(symbol)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 font-mono text-xs text-[var(--color-cyan)] bg-[var(--color-cyan)]/10 px-1.5 py-0.5 rounded hover:bg-[var(--color-cyan)]/20 transition-colors"
+                      title="在东方财富查看行情"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {symbol}
-                    </span>
+                      <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                      </svg>
+                    </a>
                     {createdAt && (
                       <span className="text-xs text-[var(--text-muted)] flex items-center gap-1">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

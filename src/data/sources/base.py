@@ -99,3 +99,17 @@ class BaseDataSource(ABC):
         change_pct_60d, change_pct_ytd, volume_ratio
         """
         raise NotImplementedError(f"{self.name} 不支持实时行情快照")
+
+    def fetch_business_composition(self, symbol: str) -> pd.DataFrame:
+        """获取分业务/分产品营收构成
+
+        返回：product, revenue, revenue_pct, gross_margin, cost, report_date
+        """
+        raise NotImplementedError(f"{self.name} 不支持分业务营收构成")
+
+    def fetch_profit_forecast(self, symbol: str) -> pd.DataFrame:
+        """获取券商盈利预测/一致预期
+
+        返回：year, institution, eps, profit, revenue 等
+        """
+        raise NotImplementedError(f"{self.name} 不支持券商盈利预测")

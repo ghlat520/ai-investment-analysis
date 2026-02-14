@@ -1,4 +1,5 @@
 import type { ChainStock } from '../../types/hotspot';
+import { getEastMoneyUrl } from '../../utils/stockLink';
 
 interface Props {
   upstream: ChainStock[];
@@ -29,7 +30,21 @@ function ChainColumn({ title, stocks, color, onStockClick }: {
           >
             <div className="flex items-center justify-between mb-0.5">
               <span className="text-xs font-medium text-white truncate">{stock.name}</span>
-              <span className="text-[10px] text-[var(--text-muted)] ml-1 flex-shrink-0">{stock.symbol}</span>
+              <div className="flex items-center gap-1 ml-1 flex-shrink-0">
+                <span className="text-[10px] text-[var(--text-muted)]">{stock.symbol}</span>
+                <a
+                  href={getEastMoneyUrl(stock.symbol)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--color-cyan)] opacity-40 hover:opacity-100 transition-opacity"
+                  title="在东方财富查看行情"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
+              </div>
             </div>
             <div className="text-[10px] text-[var(--text-secondary)] truncate" title={stock.role}>
               {stock.role}

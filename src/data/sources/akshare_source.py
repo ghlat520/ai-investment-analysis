@@ -288,6 +288,61 @@ class AKShareSource(BaseDataSource):
             logger.debug(f"[akshare] 个股新闻获取失败: {e}")
             return []
 
+    def fetch_business_composition(self, symbol: str) -> pd.DataFrame:
+        """获取分业务/分产品营收构成（东方财富主营业务分析）"""
+        import akshare as ak
+
+        code = symbol.split(".")[0]
+        # stock_zygc_em 需要 SH/SZ 前缀格式
+        prefix = "SH" if code.startswith("6") else "SZ"
+        em_symbol = f"{prefix}{code}"
+        try:
+            df = ak.stock_zygc_em(symbol=em_symbol)
+            if df.empty:
+                return df
+
+            result = pd.DataFrame()
+            result["product"] = df.get("主营构成", df.columns[0])
+            result["revenue"] = pd.to_numeric(df.get("主营收入", 0), errors="coerce")
+            result["revenue_pct"] = pd.to_numeric(df.get("收入比例", 0), errors="coerce")
+            result["gross_margin"] = pd.to_numeric(df.get("毛利率", 0), errors="coerce")
+            result["cost"] = pd.to_numeric(df.get("主营成本", 0), errors="coerce")
+            result["report_date"] = df.get("报告日期", "").astype(str)
+            result["classification"] = df.get("分类类型", "").astype(str)
+
+            logger.debug(f"[akshare] 分业务构成: {code}, {len(result)}项")
+            return result
+        except Exception as e:
+            logger.debug(f"[akshare] 分业务构成获取失败: {e}")
+            return pd.DataFrame()
+
+    def fetch_profit_forecast(self, symbol: str) -> pd.DataFrame:
+        """获取券商盈利预测/一致预期EPS（同花顺接口）
+
+        返回标准化列：year, num_institutions, eps_min, eps_mean, eps_max, industry_avg
+        """
+        import akshare as ak
+
+        code = symbol.split(".")[0]
+        try:
+            df = ak.stock_profit_forecast_ths(symbol=code)
+            if df.empty:
+                return df
+
+            result = pd.DataFrame()
+            result["year"] = df.get("年度", "")
+            result["num_institutions"] = pd.to_numeric(df.get("预测机构数", 0), errors="coerce")
+            result["eps_min"] = pd.to_numeric(df.get("最小值", 0), errors="coerce")
+            result["eps_mean"] = pd.to_numeric(df.get("均值", 0), errors="coerce")
+            result["eps_max"] = pd.to_numeric(df.get("最大值", 0), errors="coerce")
+            result["industry_avg"] = pd.to_numeric(df.get("行业平均数", 0), errors="coerce")
+
+            logger.debug(f"[akshare] 券商盈利预测: {code}, {len(result)}年")
+            return result
+        except Exception as e:
+            logger.debug(f"[akshare] 券商盈利预测获取失败: {e}")
+            return pd.DataFrame()
+
     def fetch_money_flow(self, symbol: str, days: int = 20) -> pd.DataFrame:
         import akshare as ak
 

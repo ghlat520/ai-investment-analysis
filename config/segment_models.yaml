@@ -1,0 +1,52 @@
+# 分业务线盈利预测模型
+# 用户自有研究可覆写自动API数据，提供精确到白板级别的前瞻估值
+# 格式：profiles.<symbol> 下定义各业务线的营收预测、毛利率、期间费用等
+# 无此文件或无对应symbol时，系统自动使用API数据
+
+profiles:
+  "300054.SZ":
+    name: "鼎龙股份"
+    total_shares_billion: 0.82
+    segments:
+      - name: "抛光垫"
+        margin_pct: 65
+        projections: {2026: 14.3, 2027: 17.2, 2028: 20.6, 2029: 24}
+      - name: "抛光液"
+        margin_pct: 65
+        projections: {2026: 5, 2027: 8, 2028: 12, 2029: 18}
+      - name: "显示材料"
+        margin_pct: 65
+        projections: {2026: 7.7, 2027: 10.8, 2028: 13, 2029: 15.6}
+      - name: "光刻胶"
+        margin_pct: 65
+        projections: {2026: 0.2, 2027: 0.6, 2028: 2, 2029: 5}
+      - name: "封装材料"
+        margin_pct: 65
+        projections: {2026: 0.55, 2027: 1.5, 2028: 3, 2029: 5}
+      - name: "芯片设计"
+        margin_pct: 65
+        projections: {2026: 1.2, 2027: 1.2, 2028: 1.2, 2029: 1.2}
+      - name: "锂电材料"
+        margin_pct: 10
+        projections: {2026: 1, 2027: 1.4, 2028: 1.8, 2029: 2.34}
+      - name: "传统业务"
+        margin_pct: 25
+        projections: {2026: 14, 2027: 14, 2028: 14, 2029: 12}
+    period_costs:
+      2026: 11.61
+      2027: 12.35
+      2028: 13.80
+      2029: 15.47
+    pe_assumption:
+      method: "segment_weighted"
+      segments_pe:
+        "半导体": 40
+        "抛光": 40
+        "显示": 40
+        "光刻": 40
+        "封装": 40
+        "芯片": 40
+        "锂电": 15
+        "传统": 10
+    data_source: "自有调研+管理层指引"
+    last_updated: "2026-02-14"

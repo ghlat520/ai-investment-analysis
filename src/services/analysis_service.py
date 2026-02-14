@@ -13,6 +13,25 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 
+def _load_segment_model(symbol: str) -> dict | None:
+    """从config/segment_models.yaml加载分业务线预测模型（如果有）"""
+    from pathlib import Path
+    config_path = Path(__file__).parent.parent.parent / "config" / "segment_models.yaml"
+    if not config_path.exists():
+        return None
+    try:
+        import yaml
+        with open(config_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        profiles = data.get("profiles", {})
+        # 支持 300054.SZ 和 300054 两种格式匹配
+        model = profiles.get(symbol) or profiles.get(symbol.split(".")[0])
+        return model
+    except Exception as e:
+        logger.debug(f"[segment_model] YAML加载失败: {e}")
+        return None
+
+
 def collect_stock_data(symbol: str, market: str = "A"):
     """采集单只股票的全部数据
 
@@ -114,6 +133,33 @@ def collect_stock_data(symbol: str, market: str = "A"):
     except Exception as e:
         logger.warning(f"[采集] 新闻获取失败: {e}")
 
+    # 6. 分业务营收构成
+    logger.info("[采集] 分业务营收构成...")
+    business_comp_data: list[dict] = []
+    try:
+        business_comp = source_mgr.fetch_business_composition(symbol)
+        if not business_comp.empty:
+            business_comp_data = business_comp.to_dict("records")
+            logger.info(f"[采集] 分业务构成: {len(business_comp_data)}项")
+    except Exception as e:
+        logger.debug(f"[采集] 分业务构成获取失败（非致命）: {e}")
+
+    # 7. 券商盈利预测
+    logger.info("[采集] 券商盈利预测...")
+    profit_forecast_data: list[dict] = []
+    try:
+        profit_forecast = source_mgr.fetch_profit_forecast(symbol)
+        if not profit_forecast.empty:
+            profit_forecast_data = profit_forecast.to_dict("records")
+            logger.info(f"[采集] 券商预测: {len(profit_forecast_data)}条")
+    except Exception as e:
+        logger.debug(f"[采集] 券商盈利预测获取失败（非致命）: {e}")
+
+    # 8. YAML覆写（如果有精细预测）
+    segment_model = _load_segment_model(symbol)
+    if segment_model:
+        logger.info(f"[采集] 加载YAML分业务预测模型: {segment_model.get('name', symbol)}")
+
     # 合并估值数据到财务数据
     if valuation_data and financial_data:
         latest_val = valuation_data[-1]
@@ -165,6 +211,9 @@ def collect_stock_data(symbol: str, market: str = "A"):
         info={
             "valuation_history": valuation_data,
             "data_warnings": data_warnings,
+            "business_composition": business_comp_data,
+            "profit_forecast": profit_forecast_data,
+            "segment_model": segment_model,
         },
     )
 

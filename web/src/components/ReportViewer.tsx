@@ -132,8 +132,7 @@ export default function ReportViewer({ report }: ReportViewerProps) {
   // If only 1-2 sections, show as plain (no tabs needed)
   if (sections.length <= 2) {
     return (
-      <div className="terminal-card p-5 animate-slide-up">
-        <span className="label-uppercase mb-3 block">RESEARCH REPORT 投研报告</span>
+      <div>
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
           {report}
         </ReactMarkdown>
@@ -142,33 +141,27 @@ export default function ReportViewer({ report }: ReportViewerProps) {
   }
 
   return (
-    <div className="terminal-card animate-slide-up">
-      {/* Header + Tabs */}
-      <div className="px-5 pt-4 pb-0">
-        <span className="label-uppercase mb-3 block">RESEARCH REPORT 投研报告</span>
-        <div className="flex gap-0.5 overflow-x-auto pb-0 -mb-px scrollbar-hide">
-          {sections.map((section, idx) => (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => setActiveTab(idx)}
-              className={`px-3 py-2 text-xs font-medium whitespace-nowrap rounded-t-lg transition-all border-b-2 ${
-                activeTab === idx
-                  ? 'text-[var(--color-cyan)] border-[var(--color-cyan)] bg-[var(--bg-elevated)]'
-                  : 'text-[var(--text-muted)] border-transparent hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/50'
-              }`}
-            >
-              {section.title}
-            </button>
-          ))}
-        </div>
+    <div>
+      {/* Sub-tabs for report sections */}
+      <div className="flex flex-wrap gap-1 pb-2 -mb-px border-b border-white/5">
+        {sections.map((section, idx) => (
+          <button
+            key={idx}
+            type="button"
+            onClick={() => setActiveTab(idx)}
+            className={`px-2.5 py-1.5 text-xs font-medium whitespace-nowrap rounded-md transition-all ${
+              activeTab === idx
+                ? 'text-[var(--color-cyan)] bg-[var(--bg-elevated)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/50'
+            }`}
+          >
+            {section.title}
+          </button>
+        ))}
       </div>
 
-      {/* Divider */}
-      <div className="border-t border-white/5" />
-
       {/* Tab content */}
-      <div className="p-5 max-h-[600px] overflow-y-auto">
+      <div className="pt-3 max-h-[500px] overflow-y-auto">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
           {sections[activeTab]?.content || ''}
         </ReactMarkdown>
