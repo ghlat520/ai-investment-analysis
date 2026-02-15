@@ -7,6 +7,7 @@ Phase 2+：异步 PostgreSQL（生产环境）
 
 from __future__ import annotations
 
+import atexit
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator, Optional
@@ -73,4 +74,5 @@ def get_database() -> Database:
     global _db
     if _db is None:
         _db = Database()
+        atexit.register(_db.close)
     return _db

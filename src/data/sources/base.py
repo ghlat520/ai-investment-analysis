@@ -179,7 +179,7 @@ class BaseDataSource(ABC):
         """
         raise NotImplementedError(f"{self.name} 不支持涨停池")
 
-    def fetch_industry_peers(self, symbol: str) -> pd.DataFrame:
+    def fetch_industry_peers(self, symbol: str, industry: str = "") -> pd.DataFrame:
         """获取同行业个股（行业成分股）
 
         返回：symbol, name, price, change_pct, pe, pb, turnover_rate
