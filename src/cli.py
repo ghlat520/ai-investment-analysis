@@ -351,6 +351,144 @@ def hotspot(output: str | None) -> None:
         click.echo(f"研报已保存: {output}")
 
 
+# ─── batch ───────────────────────────────────────────────
+
+@main.command()
+@click.option("--stocks", default=None, help="逗号分隔的股票代码（如 300054.SZ,600150.SH）")
+@click.option("--file", "file_path", default=None, help="股票列表文件（每行一个代码）")
+@click.option("--resume", is_flag=True, help="断点续传（从上次中断处继续）")
+@click.option("--output-dir", default=None, help="输出目录（默认 output/batch）")
+@click.option("--research-dir", default=None, help="研报PDF目录")
+@click.option("--cooldown", default=5, help="股间冷却秒数")
+def batch(
+    stocks: str | None,
+    file_path: str | None,
+    resume: bool,
+    output_dir: str | None,
+    research_dir: str | None,
+    cooldown: int,
+) -> None:
+    """批量分析多只股票（串行执行，支持断点续传）"""
+    from pathlib import Path
+    from src.services.batch_service import batch_analyze, parse_stock_list
+
+    if not stocks and not file_path:
+        click.echo("错误: 必须指定 --stocks 或 --file")
+        click.echo("示例: ai-invest batch --stocks 300054.SZ,600150.SH")
+        click.echo("示例: ai-invest batch --file watchlist.txt")
+        return
+
+    symbols = parse_stock_list(stocks_str=stocks, file_path=file_path)
+    if not symbols:
+        click.echo("错误: 未找到有效的股票代码")
+        return
+
+    click.echo(f"=== 批量分析: {len(symbols)}只股票 ===")
+    click.echo(f"股票列表: {', '.join(symbols)}")
+    click.echo(f"预计耗时: ~{len(symbols) * 11}分钟")
+    click.echo("")
+
+    out_dir = Path(output_dir) if output_dir else None
+
+    def on_done(symbol: str, idx: int, total: int, result: dict):
+        score = result.get("score", 0)
+        action = result.get("action", "")
+        name = result.get("name", "")
+        click.echo(f"  [{idx}/{total}] {name}({symbol}): {score:+d} {action}")
+
+    t0 = time.time()
+    result = batch_analyze(
+        symbols=symbols,
+        output_dir=out_dir,
+        resume=resume,
+        research_dir=research_dir,
+        on_stock_done=on_done,
+        cooldown=cooldown,
+    )
+    elapsed = time.time() - t0
+
+    click.echo(f"\n{'='*60}")
+    click.echo(result["summary"])
+    click.echo(f"{'='*60}")
+    click.echo(f"\n总耗时: {elapsed/60:.1f}分钟")
+
+    out_path = out_dir or Path("output/batch")
+    click.echo(f"输出目录: {out_path}")
+    click.echo(f"汇总报告: {out_path}/summary.md")
+
+
+# ─── pipeline ────────────────────────────────────────────
+
+@main.command()
+@click.option("--hotspot", "use_hotspot", is_flag=True, help="从盘前热点选股")
+@click.option("--screen", "use_screen", is_flag=True, help="从量化筛选选股")
+@click.option("--top-n", default=5, help="选取Top N进行深度分析")
+@click.option("--output-dir", default=None, help="输出目录")
+def pipeline(use_hotspot: bool, use_screen: bool, top_n: int, output_dir: str | None) -> None:
+    """端到端投研流水线: 选股 → 批量深度分析 → 汇总报告"""
+    from pathlib import Path
+    from src.services.batch_service import batch_analyze
+
+    if not use_hotspot and not use_screen:
+        click.echo("错误: 必须指定 --hotspot 或 --screen")
+        click.echo("示例: ai-invest pipeline --hotspot --top-n 5")
+        return
+
+    symbols: list[str] = []
+
+    if use_hotspot:
+        click.echo("=== Phase 1: 盘前热点分析 ===")
+        from src.services.hotspot_service import run_hotspot_streaming
+
+        result = run_hotspot_streaming()
+        # 从分析结果中提取推荐股票代码
+        analyzed_themes = result.get("analyzed_themes", [])
+        for theme in analyzed_themes:
+            if hasattr(theme, "key_stocks"):
+                for stock in theme.key_stocks:
+                    code = getattr(stock, "code", "") or stock.get("code", "")
+                    if code and code not in symbols:
+                        symbols.append(code)
+        click.echo(f"  热点选出 {len(symbols)} 只候选股票")
+
+    if use_screen:
+        click.echo("=== Phase 1: 量化筛选 ===")
+        from src.market.adapter import AShareAdapter
+        from src.screening.engine import ScreeningEngine
+
+        adapter = AShareAdapter()
+        source_manager = adapter.create_source_manager()
+        engine = ScreeningEngine(source_manager)
+        results = engine.run(market="A")
+        symbols = [r.symbol for r in results[:top_n]]
+        click.echo(f"  筛选出 Top {len(symbols)} 只股票")
+
+    if not symbols:
+        click.echo("未选出有效股票，流水线结束")
+        return
+
+    symbols = symbols[:top_n]
+    click.echo(f"\n=== Phase 2: 批量深度分析 ({len(symbols)}只) ===")
+    click.echo(f"股票: {', '.join(symbols)}")
+
+    out_dir = Path(output_dir) if output_dir else None
+
+    def on_done(symbol: str, idx: int, total: int, result: dict):
+        click.echo(
+            f"  [{idx}/{total}] {result.get('name', '')}({symbol}): "
+            f"{result.get('score', 0):+d} {result.get('action', '')}"
+        )
+
+    t0 = time.time()
+    result = batch_analyze(symbols=symbols, output_dir=out_dir, on_stock_done=on_done)
+    elapsed = time.time() - t0
+
+    click.echo(f"\n{'='*60}")
+    click.echo(result["summary"])
+    click.echo(f"{'='*60}")
+    click.echo(f"\n总耗时: {elapsed/60:.1f}分钟")
+
+
 # ─── serve ────────────────────────────────────────────────
 
 @main.command()
