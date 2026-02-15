@@ -76,6 +76,7 @@ web = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "sse-starlette>=2.0.0",
+    "python-multipart>=0.0.9",
 ]
 
 [project.scripts]
