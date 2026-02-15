@@ -351,6 +351,46 @@ def hotspot(output: str | None) -> None:
         click.echo(f"研报已保存: {output}")
 
 
+# ─── growth-screen ────────────────────────────────────────
+
+@main.command("growth-screen")
+@click.option("--market", default="A", help="市场（A/HK/US）")
+@click.option("--min-periods", default=3, help="最少连续增长期数")
+@click.option("--top-n", default=50, help="输出Top N")
+def growth_screen(market: str, min_periods: int, top_n: int) -> None:
+    """连续季度增长筛选：找出连续多季度业绩同比增长的股票"""
+    from src.market.adapter import AShareAdapter
+    from src.screening.engine import ScreeningEngine
+
+    logger.info(f"连续增长筛选: market={market} min_periods={min_periods} top_n={top_n}")
+    t0 = time.time()
+
+    adapter = AShareAdapter()
+    source_manager = adapter.create_source_manager()
+    engine = ScreeningEngine(source_manager)
+    results = engine.run_growth_screen(market=market, min_periods=min_periods, top_n=top_n)
+
+    elapsed = time.time() - t0
+
+    if not results:
+        click.echo("筛选无结果（无股票满足连续增长条件）")
+        return
+
+    click.echo(f"\n{'排名':>4} {'代码':<12} {'名称':<8} {'综合':>6} {'连续增长':>8} {'质量':>5} {'估值':>5}")
+    click.echo("-" * 60)
+    for r in results[:top_n]:
+        fs = r.factor_scores
+        click.echo(
+            f"{r.rank:>4} {r.symbol:<12} {r.name:<8}"
+            f" {r.composite_score:>6.1f}"
+            f" {fs.get('consecutive_growth', 0):>8.1f}"
+            f" {fs.get('quality', 0):>5.1f}"
+            f" {fs.get('valuation', 0):>5.1f}"
+        )
+
+    click.echo(f"\n耗时: {elapsed:.1f}s | 共{len(results)}只")
+
+
 # ─── batch ───────────────────────────────────────────────
 
 @main.command()

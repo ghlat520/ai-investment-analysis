@@ -37,3 +37,13 @@ screening:
     momentum_score:
       weight: 0.20
       description: "60日涨幅（钟形20%最优）+ YTD涨幅 + 量比（1.5-3最优）"
+
+  # 连续增长专项筛选配置（growth-screen 命令使用）
+  growth_screen:
+    min_periods: 3           # 最少连续增长期数
+    top_n: 50                # 输出Top N
+    min_score: 60            # 连续增长因子最低分（过滤门槛）
+    weights:
+      consecutive_growth: 0.50  # 核心权重
+      quality: 0.30             # 辅助：ROE/毛利率/现金流
+      valuation: 0.20           # 辅助：PE/PB

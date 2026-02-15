@@ -7,11 +7,13 @@ Layer 1: 纯代码，全市场覆盖 5000+ 标的
 数据策略：
 - 主数据源：stock_yjbb_em 批量财报（~5000只，always works）
 - 辅助数据源：stock_zh_a_spot_em 实时行情（PE/PB/市值/涨跌幅）
+- 多期数据：拉取最近4期季报，计算连续增长因子
 - 优雅降级：spot数据不可用时，仅用财报因子筛选
 """
 
 from __future__ import annotations
 
+import time as _time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -51,10 +53,15 @@ class ScreeningEngine:
                 return yaml.safe_load(f).get("screening", {})
         return {"top_n": 50}
 
-    def run(self, market: str = "A") -> list[ScreeningResult]:
-        """执行筛选流程"""
+    def run(self, market: str = "A", include_growth: bool = False) -> list[ScreeningResult]:
+        """执行筛选流程
+
+        Args:
+            market: 市场
+            include_growth: 是否包含连续增长因子（需额外拉取多期数据，+30s）
+        """
         top_n = self._config.get("top_n", 50)
-        logger.info(f"开始量化筛选 market={market} top_n={top_n}")
+        logger.info(f"开始量化筛选 market={market} top_n={top_n} growth={include_growth}")
 
         # Step 1: 获取批量财务数据（主数据源）
         fin_df = self._fetch_batch_financial()
@@ -62,6 +69,11 @@ class ScreeningEngine:
             logger.error("获取批量财务数据失败")
             return []
         logger.info(f"批量财务数据: {len(fin_df)}只")
+
+        # Step 1.5: 多期数据（连续增长因子，可选）
+        multi_period: dict[str, pd.DataFrame] = {}
+        if include_growth:
+            multi_period = self._fetch_multi_period_financial(n_periods=4)
 
         # Step 2: 尝试获取实时行情（辅助数据源，可能失败）
         spot_df = self._fetch_spot_data(market)
@@ -89,7 +101,7 @@ class ScreeningEngine:
             return []
 
         # Step 4: 计算因子评分
-        scored = self._score_all(filtered, has_spot)
+        scored = self._score_all(filtered, has_spot, multi_period=multi_period)
 
         # Step 5: 排名输出
         scored = scored.sort_values("composite_score", ascending=False).head(top_n)
@@ -118,6 +130,47 @@ class ScreeningEngine:
         except Exception as e:
             logger.error(f"批量财务数据获取失败: {e}")
             return pd.DataFrame()
+
+    @staticmethod
+    def _get_recent_report_dates(n: int = 4) -> list[str]:
+        """获取最近N个季报期的日期字符串（YYYYMMDD）"""
+        from datetime import date
+
+        today = date.today()
+        # 所有季报期：Q1=0331, Q2=0630, Q3=0930, Q4=1231
+        quarters = [(today.year, "0331"), (today.year, "0630"),
+                     (today.year, "0930"), (today.year, "1231")]
+        # 往前推2年确保够用
+        for y in range(today.year - 1, today.year - 3, -1):
+            quarters.extend([(y, "0331"), (y, "0630"), (y, "0930"), (y, "1231")])
+
+        # 过滤掉未来的日期，按时间降序
+        dates = []
+        for year, mmdd in quarters:
+            d = f"{year}{mmdd}"
+            if int(d) <= int(today.strftime("%Y%m%d")):
+                dates.append(d)
+        dates.sort(reverse=True)
+        return dates[:n]
+
+    def _fetch_multi_period_financial(self, n_periods: int = 4) -> dict[str, pd.DataFrame]:
+        """获取最近N期批量财务数据
+
+        Returns:
+            {report_date: DataFrame} 按时间降序
+        """
+        dates = self._get_recent_report_dates(n_periods)
+        result = {}
+        for d in dates:
+            try:
+                df = self._source.fetch_batch_financial(report_date=d)
+                if not df.empty:
+                    result[d] = df
+                    logger.info(f"[多期财报] {d}: {len(df)}只")
+                _time.sleep(1)  # API冷却
+            except Exception as e:
+                logger.warning(f"[多期财报] {d} 获取失败: {e}")
+        return result
 
     def _fetch_spot_data(self, market: str) -> pd.DataFrame:
         """获取实时行情（允许失败）"""
@@ -162,7 +215,10 @@ class ScreeningEngine:
 
         return df.reset_index(drop=True)
 
-    def _score_all(self, df: pd.DataFrame, has_spot: bool) -> pd.DataFrame:
+    def _score_all(
+        self, df: pd.DataFrame, has_spot: bool,
+        multi_period: Optional[dict[str, pd.DataFrame]] = None,
+    ) -> pd.DataFrame:
         """计算所有因子评分"""
         factors_config = self._config.get("factors", {})
         df = df.copy()
@@ -178,6 +234,12 @@ class ScreeningEngine:
             valuation = pd.Series(50.0, index=df.index)  # 中性默认
             momentum = pd.Series(50.0, index=df.index)
 
+        # 连续增长因子（可选）
+        if multi_period:
+            consec_growth = self._calc_consecutive_growth_score(df, multi_period)
+        else:
+            consec_growth = None
+
         # 权重（从配置读取，或使用默认值）
         w_quality = factors_config.get("quality_score", {}).get("weight", 0.30)
         w_growth = factors_config.get("growth_score", {}).get("weight", 0.25) if "growth_score" in factors_config else 0.25
@@ -185,29 +247,43 @@ class ScreeningEngine:
         w_momentum = factors_config.get("momentum_score", {}).get("weight", 0.20)
 
         if not has_spot:
-            # 无spot数据时，重新分配权重给quality和growth
             total_w = w_quality + w_growth
             w_quality = w_quality / total_w * 0.85
             w_growth = w_growth / total_w * 0.85
             w_valuation = 0.075
             w_momentum = 0.075
 
-        df["composite_score"] = (
-            quality * w_quality +
-            growth * w_growth +
-            valuation * w_valuation +
-            momentum * w_momentum
-        )
+        if consec_growth is not None:
+            # 有连续增长因子时，从其他因子匀出15%权重
+            w_consec = 0.15
+            scale = 1.0 - w_consec
+            df["composite_score"] = (
+                quality * w_quality * scale +
+                growth * w_growth * scale +
+                valuation * w_valuation * scale +
+                momentum * w_momentum * scale +
+                consec_growth * w_consec
+            )
+        else:
+            df["composite_score"] = (
+                quality * w_quality +
+                growth * w_growth +
+                valuation * w_valuation +
+                momentum * w_momentum
+            )
 
         # 保存各因子得分
         factor_scores_list = []
         for i in range(len(df)):
-            factor_scores_list.append({
+            fs = {
                 "quality": round(float(quality.iloc[i]), 1),
                 "growth": round(float(growth.iloc[i]), 1),
                 "valuation": round(float(valuation.iloc[i]), 1),
                 "momentum": round(float(momentum.iloc[i]), 1),
-            })
+            }
+            if consec_growth is not None:
+                fs["consecutive"] = round(float(consec_growth.iloc[i]), 1)
+            factor_scores_list.append(fs)
         df["factor_scores"] = factor_scores_list
 
         return df
@@ -327,3 +403,207 @@ class ScreeningEngine:
             score = score + vr_score
 
         return np.clip(score, 0, 100)
+
+    def _calc_consecutive_growth_score(
+        self, df: pd.DataFrame, multi_period: dict[str, pd.DataFrame],
+    ) -> pd.Series:
+        """连续增长因子：基于多期季报数据
+
+        评分逻辑（0-100）：
+        - 连续N期利润同比正增长：N×15分（最高45分）
+        - 连续N期营收同比正增长：N×10分（最高30分）
+        - 增速递增加分：最新期 > 上期 → +10分
+        - 环比正增长加分：利润环比>0 → +5/期（最高15分）
+        """
+        if not multi_period:
+            return pd.Series(50.0, index=df.index)
+
+        # 按时间降序排列的季报期
+        sorted_dates = sorted(multi_period.keys(), reverse=True)
+
+        # 构建每只股票的多期增速矩阵
+        # {symbol: [{profit_yoy, revenue_yoy, profit_qoq, revenue_qoq}, ...]}
+        symbol_growth: dict[str, list[dict]] = {}
+        for d in sorted_dates:
+            period_df = multi_period[d]
+            for _, row in period_df.iterrows():
+                sym = row.get("symbol", "")
+                if not sym:
+                    continue
+                if sym not in symbol_growth:
+                    symbol_growth[sym] = []
+                symbol_growth[sym].append({
+                    "date": d,
+                    "profit_yoy": _safe_float(row.get("profit_yoy")),
+                    "revenue_yoy": _safe_float(row.get("revenue_yoy")),
+                })
+
+        # 为 df 中每只股票计算得分
+        scores = []
+        for _, row in df.iterrows():
+            sym = row.get("symbol", "")
+            periods = symbol_growth.get(sym, [])
+            scores.append(_score_consecutive_growth(periods))
+
+        return pd.Series(scores, index=df.index, dtype=float)
+
+    def run_growth_screen(
+        self, market: str = "A", min_periods: int = 3, top_n: int = 50,
+    ) -> list[ScreeningResult]:
+        """专项筛选：连续季度增长股票
+
+        与 run() 的区别：以连续增长因子为核心权重。
+
+        Args:
+            market: 市场
+            min_periods: 最少连续增长的期数
+            top_n: 输出Top N
+        """
+        logger.info(f"开始连续增长筛选 min_periods={min_periods} top_n={top_n}")
+
+        # Step 1: 获取多期财报数据
+        multi_period = self._fetch_multi_period_financial(n_periods=min_periods + 1)
+        if not multi_period:
+            logger.error("获取多期财务数据失败")
+            return []
+
+        # Step 2: 以数据量最大的一期为基础（最新期可能只有少量股票披露）
+        sorted_dates = sorted(multi_period.keys(), reverse=True)
+        base_date = sorted_dates[0]
+        for d in sorted_dates:
+            if len(multi_period[d]) >= 1000:
+                base_date = d
+                break
+        fin_df = multi_period[base_date].copy()
+        logger.info(f"基础数据: {base_date}, {len(fin_df)}只")
+
+        # Step 3: 实时行情（辅助）
+        spot_df = self._fetch_spot_data(market)
+        has_spot = False
+        if not spot_df.empty:
+            logger.info(f"实时行情: {len(spot_df)}只")
+            fin_df = fin_df.merge(
+                spot_df[["symbol", "price", "change_pct", "pe", "pb",
+                         "total_market_cap", "float_market_cap",
+                         "change_pct_60d", "change_pct_ytd",
+                         "volume_ratio", "turnover_rate", "amount"]],
+                on="symbol", how="left",
+            )
+            has_spot = True
+
+        # Step 4: 前置过滤
+        filtered = self._pre_filter(fin_df, has_spot)
+        logger.info(f"前置过滤后: {len(filtered)}")
+        if filtered.empty:
+            return []
+
+        # Step 5: 计算连续增长因子
+        consec_score = self._calc_consecutive_growth_score(filtered, multi_period)
+
+        # Step 6: 其他因子
+        quality = self._calc_quality_score(filtered)
+        if has_spot:
+            valuation = self._calc_valuation_score(filtered)
+        else:
+            valuation = pd.Series(50.0, index=filtered.index)
+
+        # 连续增长为核心权重
+        filtered = filtered.copy()
+        filtered["composite_score"] = (
+            consec_score * 0.50 +   # 连续增长（核心）
+            quality * 0.30 +        # 质量（辅助）
+            valuation * 0.20        # 估值（辅助）
+        )
+
+        # 过滤：连续增长分 >= 60才有意义
+        filtered = filtered[consec_score >= 60]
+        logger.info(f"连续增长过滤后: {len(filtered)}")
+
+        if filtered.empty:
+            return []
+
+        # 保存因子得分
+        factor_scores_list = []
+        for i in filtered.index:
+            factor_scores_list.append({
+                "consecutive_growth": round(float(consec_score.loc[i]), 1),
+                "quality": round(float(quality.loc[i]), 1),
+                "valuation": round(float(valuation.loc[i]), 1),
+            })
+        filtered["factor_scores"] = factor_scores_list
+
+        # 排名
+        filtered = filtered.sort_values("composite_score", ascending=False).head(top_n)
+        filtered["rank"] = range(1, len(filtered) + 1)
+
+        results = []
+        for _, row in filtered.iterrows():
+            results.append(
+                ScreeningResult(
+                    symbol=row["symbol"],
+                    name=row.get("name", ""),
+                    rank=row["rank"],
+                    composite_score=round(row["composite_score"], 2),
+                    factor_scores=row.get("factor_scores", {}),
+                    industry=row.get("industry", ""),
+                )
+            )
+
+        logger.info(f"连续增长筛选完成: {len(results)}只")
+        return results
+
+
+def _safe_float(val) -> float:
+    """安全转float"""
+    try:
+        v = float(val)
+        return v if not np.isnan(v) else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _score_consecutive_growth(periods: list[dict]) -> float:
+    """计算单只股票的连续增长得分
+
+    Args:
+        periods: 按时间降序排列的多期增速数据
+
+    Returns:
+        0-100分
+    """
+    if len(periods) < 2:
+        return 30.0  # 数据不足，中性偏低
+
+    score = 0.0
+
+    # 1. 连续利润同比正增长（每期15分，最高45分）
+    profit_streak = 0
+    for p in periods:
+        if p["profit_yoy"] > 0:
+            profit_streak += 1
+        else:
+            break
+    score += min(profit_streak * 15, 45)
+
+    # 2. 连续营收同比正增长（每期10分，最高30分）
+    revenue_streak = 0
+    for p in periods:
+        if p["revenue_yoy"] > 0:
+            revenue_streak += 1
+        else:
+            break
+    score += min(revenue_streak * 10, 30)
+
+    # 3. 利润增速递增（最新 > 上期 → +10）
+    if len(periods) >= 2 and periods[0]["profit_yoy"] > periods[1]["profit_yoy"] > 0:
+        score += 10
+
+    # 4. 营收增速递增（最新 > 上期 → +5）
+    if len(periods) >= 2 and periods[0]["revenue_yoy"] > periods[1]["revenue_yoy"] > 0:
+        score += 5
+
+    # 5. 最新期增速高（利润同比>30% → +10）
+    if periods[0]["profit_yoy"] > 30:
+        score += 10
+
+    return min(score, 100.0)
