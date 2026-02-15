@@ -11,6 +11,7 @@ class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="股票代码，如 300054.SZ")
     market: str = Field("A", description="市场：A/HK/US")
     use_research: bool = Field(False, description="是否使用已上传的研报PDF")
+    auto_research: bool = Field(True, description="自动从东财采集最新研报（默认开启）")
 
 
 class TaskAccepted(BaseModel):

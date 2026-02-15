@@ -57,7 +57,10 @@ def trigger_analysis(request: AnalyzeRequest) -> JSONResponse:
     research_dir = _get_research_dir(request.symbol) if request.use_research else None
     try:
         task_info = task_queue.submit_task(
-            symbol=request.symbol, market=request.market, research_dir=research_dir,
+            symbol=request.symbol,
+            market=request.market,
+            research_dir=research_dir,
+            auto_research=request.auto_research,
         )
         return JSONResponse(
             status_code=202,

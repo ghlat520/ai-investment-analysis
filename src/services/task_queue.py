@@ -47,6 +47,7 @@ class TaskInfo:
     run_id: Optional[str] = None
     error: Optional[str] = None
     research_dir: Optional[str] = None
+    auto_research: bool = True
     created_at: datetime = field(default_factory=datetime.now)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -118,7 +119,11 @@ class AnalysisTaskQueue:
     # ========== 任务提交与查询 ==========
 
     def submit_task(
-        self, symbol: str, market: str = "A", research_dir: str | None = None,
+        self,
+        symbol: str,
+        market: str = "A",
+        research_dir: str | None = None,
+        auto_research: bool = True,
     ) -> TaskInfo:
         with self._data_lock:
             if symbol in self._analyzing_stocks:
@@ -130,13 +135,14 @@ class AnalysisTaskQueue:
                 symbol=symbol,
                 market=market,
                 research_dir=research_dir,
+                auto_research=auto_research,
                 message="任务已加入队列",
             )
             self._tasks[task_id] = task_info
             self._analyzing_stocks[symbol] = task_id
 
             future = self.executor.submit(
-                self._execute_task, task_id, symbol, market, research_dir,
+                self._execute_task, task_id, symbol, market, research_dir, auto_research,
             )
             self._futures[task_id] = future
 
@@ -165,7 +171,12 @@ class AnalysisTaskQueue:
     # ========== 任务执行 ==========
 
     def _execute_task(
-        self, task_id: str, symbol: str, market: str, research_dir: str | None = None,
+        self,
+        task_id: str,
+        symbol: str,
+        market: str,
+        research_dir: str | None = None,
+        auto_research: bool = True,
     ) -> None:
         # 更新状态: collecting
         with self._data_lock:
@@ -183,7 +194,9 @@ class AnalysisTaskQueue:
             from src.data.storage.persist import persist_analysis
 
             # 1. 数据采集
-            stock_data = collect_stock_data(symbol, market, research_dir=research_dir)
+            stock_data = collect_stock_data(
+                symbol, market, research_dir=research_dir, auto_research=auto_research,
+            )
 
             with self._data_lock:
                 task.stock_name = stock_data.name

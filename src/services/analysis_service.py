@@ -77,13 +77,19 @@ def _load_segment_model(symbol: str) -> dict | None:
         return None
 
 
-def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None = None):
+def collect_stock_data(
+    symbol: str,
+    market: str = "A",
+    research_dir: str | None = None,
+    auto_research: bool = True,
+):
     """采集单只股票的全部数据
 
     Args:
         symbol: 股票代码
         market: 市场（A/HK/US）
-        research_dir: 研报 PDF 目录路径（可选）
+        research_dir: 研报 PDF 目录路径（可选，手动指定）
+        auto_research: 自动从东财采集最新研报（默认开启，research_dir 优先）
 
     Returns:
         StockData 实例
@@ -136,9 +142,7 @@ def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None 
                 if not industry_name:
                     ind_val = info_map.get("行业", "")
                     if ind_val:
-                        # 清理申万行业分类后缀（如 "电子化学品Ⅱ" → "电子化学品"）
-                        import re
-                        industry_name = re.sub(r"[ⅠⅡⅢⅣⅤⅠⅡⅢⅣⅤIViv]+$", "", str(ind_val)).strip()
+                        industry_name = str(ind_val).strip()
                         logger.info(f"[采集] 行业: {industry_name}")
         except Exception as e:
             logger.debug(f"[采集] 个股信息查询失败: {e}")
@@ -406,8 +410,23 @@ def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None 
         news_data, business_comp_data, data_warnings, stock_name,
     )
 
-    # 9. 研报PDF解析（可选）
+    # 17. 研报PDF采集与解析
     research_summaries: dict = {}
+    if not research_dir and auto_research:
+        # 自动从东财采集最新研报
+        try:
+            from src.research.fetcher import auto_fetch_research
+
+            logger.info("[采集] 自动采集最新券商研报...")
+            fetched_dir, report_meta = auto_fetch_research(symbol, top_n=3)
+            if fetched_dir:
+                research_dir = fetched_dir
+            # 用采集的元数据补充 research_reports（如果原有数据为空）
+            if report_meta and not research_report_data:
+                research_report_data = report_meta
+        except Exception as e:
+            logger.warning(f"[采集] 研报自动采集失败（非致命）: {e}")
+
     if research_dir:
         try:
             from src.research.extractor import extract_research_summaries, parse_research_pdfs

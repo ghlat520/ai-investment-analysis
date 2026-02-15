@@ -34,10 +34,17 @@ def main(debug: bool) -> None:
     _setup_logging("DEBUG" if debug else "INFO")
 
 
-def _collect_stock_data(symbol: str, market: str, research_dir: str | None = None):
+def _collect_stock_data(
+    symbol: str,
+    market: str,
+    research_dir: str | None = None,
+    auto_research: bool = True,
+):
     """采集单只股票的全部数据（委托给 service 层）"""
     from src.services.analysis_service import collect_stock_data
-    return collect_stock_data(symbol, market, research_dir=research_dir)
+    return collect_stock_data(
+        symbol, market, research_dir=research_dir, auto_research=auto_research,
+    )
 
 
 # ─── analyze ───────────────────────────────────────────────
@@ -46,17 +53,20 @@ def _collect_stock_data(symbol: str, market: str, research_dir: str | None = Non
 @click.option("--stock", required=True, help="股票代码（如 000001.SZ）")
 @click.option("--market", default="A", help="市场（A/HK/US）")
 @click.option("--notify", "do_notify", is_flag=True, help="分析后推送通知")
-@click.option("--research-dir", default=None, help="研报PDF目录路径（注入券商研报知识）")
-def analyze(stock: str, market: str, do_notify: bool, research_dir: str | None) -> None:
+@click.option("--research-dir", default=None, help="研报PDF目录路径（手动指定）")
+@click.option("--auto-research/--no-auto-research", default=True, help="自动从东财采集最新研报（默认开启）")
+def analyze(stock: str, market: str, do_notify: bool, research_dir: str | None, auto_research: bool) -> None:
     """分析单只股票"""
     from src.agents.graph import compile_analysis_graph
 
     logger.info(f"开始分析: {stock} (market={market})")
     if research_dir:
-        logger.info(f"[研报] 研报目录: {research_dir}")
+        logger.info(f"[研报] 手动研报目录: {research_dir}")
+    elif auto_research:
+        logger.info("[研报] 自动采集模式")
     t0 = time.time()
 
-    stock_data = _collect_stock_data(stock, market, research_dir=research_dir)
+    stock_data = _collect_stock_data(stock, market, research_dir=research_dir, auto_research=auto_research)
 
     logger.info(f"[分析] 启动 LangGraph 分析流水线...")
     graph = compile_analysis_graph()
