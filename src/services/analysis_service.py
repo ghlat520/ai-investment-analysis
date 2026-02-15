@@ -105,7 +105,8 @@ def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None 
     start_date = (date.today() - timedelta(days=365)).isoformat()
     stock_name = symbol
 
-    # 0. 股票名称（先查DB缓存，再查实时行情）
+    # 0. 股票名称+行业（先查DB缓存，再查实时行情）
+    industry_name = ""
     try:
         from src.data.storage.database import get_database
         from src.data.storage.models import StockInfo
@@ -114,11 +115,36 @@ def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None 
             info = sess.query(StockInfo).filter_by(symbol=symbol).first()
             if info and info.name and info.name != symbol and not info.name.endswith(('.SZ', '.SH', '.HK')):
                 stock_name = info.name
+            if info and info.industry:
+                industry_name = info.industry
     except Exception:
         pass
 
+    if stock_name == symbol or not industry_name:
+        # DB没有完整信息，尝试从akshare获取
+        try:
+            import akshare as ak
+            code = symbol.split(".")[0]
+            info_df = ak.stock_individual_info_em(symbol=code)
+            if info_df is not None and not info_df.empty:
+                info_map = dict(zip(info_df["item"], info_df["value"]))
+                if stock_name == symbol:
+                    name_val = info_map.get("股票简称", "")
+                    if name_val:
+                        stock_name = str(name_val)
+                        logger.info(f"[采集] 股票名称: {stock_name}")
+                if not industry_name:
+                    ind_val = info_map.get("行业", "")
+                    if ind_val:
+                        # 清理申万行业分类后缀（如 "电子化学品Ⅱ" → "电子化学品"）
+                        import re
+                        industry_name = re.sub(r"[ⅠⅡⅢⅣⅤⅠⅡⅢⅣⅤIViv]+$", "", str(ind_val)).strip()
+                        logger.info(f"[采集] 行业: {industry_name}")
+        except Exception as e:
+            logger.debug(f"[采集] 个股信息查询失败: {e}")
+
     if stock_name == symbol:
-        # DB没有有效名称，尝试从实时行情获取
+        # 最后尝试从实时行情获取名称
         try:
             import akshare as ak
             code = symbol.split(".")[0]
@@ -126,7 +152,7 @@ def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None 
             row = spot[spot["代码"] == code]
             if not row.empty:
                 stock_name = str(row["名称"].iloc[0])
-                logger.info(f"[采集] 股票名称: {stock_name}")
+                logger.info(f"[采集] 股票名称(spot): {stock_name}")
         except Exception as e:
             logger.debug(f"[采集] 名称查询失败: {e}")
 
@@ -205,7 +231,132 @@ def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None 
     except Exception as e:
         logger.debug(f"[采集] 券商盈利预测获取失败（非致命）: {e}")
 
-    # 8. YAML覆写（如果有精细预测）
+    # 8. 股东人数变化
+    logger.info("[采集] 股东人数...")
+    shareholder_count: list[dict] = []
+    try:
+        df = source_mgr.fetch_shareholder_count(symbol)
+        if not df.empty:
+            shareholder_count = df.to_dict("records")
+            logger.info(f"[采集] 股东人数: {len(shareholder_count)}期")
+    except Exception as e:
+        logger.debug(f"[采集] 股东人数获取失败（非致命）: {e}")
+
+    # 9. 北向资金持股
+    logger.info("[采集] 北向资金持股...")
+    northbound: list[dict] = []
+    try:
+        df = source_mgr.fetch_northbound_holdings(symbol)
+        if not df.empty:
+            northbound = df.to_dict("records")
+            logger.info(f"[采集] 北向持股: {len(northbound)}条")
+    except Exception as e:
+        logger.debug(f"[采集] 北向持股获取失败（非致命）: {e}")
+
+    # 10. 分红历史
+    logger.info("[采集] 分红历史...")
+    dividend_history: list[dict] = []
+    try:
+        df = source_mgr.fetch_dividend_history(symbol)
+        if not df.empty:
+            dividend_history = df.to_dict("records")
+            logger.info(f"[采集] 分红历史: {len(dividend_history)}期")
+    except Exception as e:
+        logger.debug(f"[采集] 分红历史获取失败（非致命）: {e}")
+
+    # 11. 龙虎榜+大宗交易
+    logger.info("[采集] 龙虎榜+大宗交易...")
+    dragon_tiger: list[dict] = []
+    try:
+        df = source_mgr.fetch_dragon_tiger(symbol, days=90)
+        if not df.empty:
+            dragon_tiger = df.to_dict("records")
+            logger.info(f"[采集] 龙虎榜/大宗: {len(dragon_tiger)}条")
+    except Exception as e:
+        logger.debug(f"[采集] 龙虎榜/大宗获取失败（非致命）: {e}")
+
+    # 12. 融资融券数据
+    logger.info("[采集] 融资融券...")
+    margin_data: list[dict] = []
+    try:
+        df = source_mgr.fetch_margin_data(symbol)
+        if not df.empty:
+            margin_data = df.to_dict("records")
+            logger.info(f"[采集] 融资融券: {len(margin_data)}条")
+    except Exception as e:
+        logger.debug(f"[采集] 融资融券获取失败（非致命）: {e}")
+
+    # 13. 人气排名（检查个股是否在Top100）
+    logger.info("[采集] 人气排名...")
+    hot_rank_info: dict = {}
+    try:
+        hot_df = source_mgr.fetch_hot_rank()
+        if not hot_df.empty:
+            code = symbol.split(".")[0]
+            match = hot_df[hot_df["symbol"].str.contains(code, na=False)]
+            if not match.empty:
+                row = match.iloc[0]
+                hot_rank_info = {
+                    "rank": int(row.get("rank", 0)),
+                    "name": str(row.get("name", "")),
+                    "price": float(row.get("price", 0) or 0),
+                    "change_pct": float(row.get("change_pct", 0) or 0),
+                }
+                logger.info(f"[采集] 人气排名: 第{hot_rank_info['rank']}名")
+            else:
+                logger.debug(f"[采集] {symbol} 不在人气Top100中")
+    except Exception as e:
+        logger.debug(f"[采集] 人气排名获取失败（非致命）: {e}")
+
+    # 14. 业绩预告（检查个股是否有预告）
+    logger.info("[采集] 业绩预告...")
+    performance_forecast: dict = {}
+    try:
+        forecast_df = source_mgr.fetch_performance_forecast()
+        if not forecast_df.empty:
+            code = symbol.split(".")[0]
+            match = forecast_df[forecast_df["symbol"].str.contains(code, na=False)]
+            if not match.empty:
+                row = match.iloc[0]
+                performance_forecast = {
+                    "forecast_type": str(row.get("forecast_type", "")),
+                    "change_pct": float(row.get("change_pct", 0) or 0),
+                    "forecast_content": str(row.get("forecast_content", "")),
+                    "announce_date": str(row.get("announce_date", "")),
+                }
+                logger.info(f"[采集] 业绩预告: {performance_forecast['forecast_type']}")
+            else:
+                logger.debug(f"[采集] {symbol} 无业绩预告")
+    except Exception as e:
+        logger.debug(f"[采集] 业绩预告获取失败（非致命）: {e}")
+
+    # 15. 同行业个股对比
+    logger.info("[采集] 同行业个股...")
+    industry_peers: list[dict] = []
+    if industry_name:
+        try:
+            df = source_mgr.fetch_industry_peers(symbol, industry=industry_name)
+            if not df.empty:
+                industry_peers = df.to_dict("records")
+                logger.info(f"[采集] 同行业个股: {len(industry_peers)}只 (行业: {industry_name})")
+        except Exception as e:
+            logger.debug(f"[采集] 同行业个股获取失败（非致命）: {e}")
+    else:
+        logger.debug("[采集] 无行业信息，跳过同行业个股")
+
+    # 16. 个股研报（机构评级+EPS预测+机构参与度）
+    logger.info("[采集] 个股研报...")
+    research_report_data: dict = {}
+    try:
+        research_report_data = source_mgr.fetch_research_reports(symbol)
+        if research_report_data:
+            coverage = research_report_data.get("coverage_count", 0)
+            rating = research_report_data.get("latest_rating", "未知")
+            logger.info(f"[采集] 个股研报: {coverage}家机构覆盖, 最新评级={rating}")
+    except Exception as e:
+        logger.debug(f"[采集] 个股研报获取失败（非致命）: {e}")
+
+    # 13. YAML覆写（如果有精细预测）
     segment_model = _load_segment_model(symbol)
     if segment_model:
         logger.info(f"[采集] 加载YAML分业务预测模型: {segment_model.get('name', symbol)}")
@@ -283,6 +434,16 @@ def collect_stock_data(symbol: str, market: str = "A", research_dir: str | None 
             "profit_forecast": profit_forecast_data,
             "segment_model": segment_model,
             "research_summaries": research_summaries,
+            "shareholder_count": shareholder_count,
+            "northbound_holdings": northbound,
+            "dividend_history": dividend_history,
+            "dragon_tiger": dragon_tiger,
+            "research_reports": research_report_data,
+            "margin_data": margin_data,
+            "hot_rank": hot_rank_info,
+            "performance_forecast": performance_forecast,
+            "industry": industry_name,
+            "industry_peers": industry_peers,
         },
     )
 

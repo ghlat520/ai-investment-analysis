@@ -34,6 +34,7 @@ def collect_market_snapshot() -> dict[str, Any]:
         "concept_boards": [],
         "industry_boards": [],
         "cctv_news": [],
+        "zt_pool": [],
     }
 
     # 1. 人气榜
@@ -71,7 +72,17 @@ def collect_market_snapshot() -> dict[str, Any]:
     except Exception as e:
         logger.warning(f"[采集] 行业板块失败: {e}")
 
-    # 4. CCTV新闻（近3天）
+    # 4. 涨停池（今日涨停股）
+    try:
+        logger.info("[采集] 涨停池...")
+        zt_df = ak.stock_zt_pool_em(date=date.today().strftime("%Y%m%d"))
+        if zt_df is not None and not zt_df.empty:
+            snapshot["zt_pool"] = zt_df.to_dict("records")
+            logger.info(f"[采集] 涨停池: {len(snapshot['zt_pool'])}只")
+    except Exception as e:
+        logger.warning(f"[采集] 涨停池失败: {e}")
+
+    # 5. CCTV新闻（近3天）
     try:
         logger.info("[采集] 政策新闻...")
         today = date.today()
@@ -107,6 +118,7 @@ def rank_hot_concepts(snapshot: dict[str, Any], top_n: int = 8) -> list[dict[str
     """
     concept_boards = snapshot.get("concept_boards", [])
     hot_stocks = snapshot.get("hot_stocks", [])
+    zt_pool = snapshot.get("zt_pool", [])
 
     if not concept_boards:
         return []
@@ -118,6 +130,13 @@ def rank_hot_concepts(snapshot: dict[str, Any], top_n: int = 8) -> list[dict[str
         if code:
             hot_codes.add(str(code))
 
+    # 提取涨停股代码集合
+    zt_codes = set()
+    for stock in zt_pool:
+        code = stock.get("代码", stock.get("股票代码", ""))
+        if code:
+            zt_codes.add(str(code))
+
     ranked = []
     for board in concept_boards:
         name = board.get("板块名称", "")
@@ -126,13 +145,14 @@ def rank_hot_concepts(snapshot: dict[str, Any], top_n: int = 8) -> list[dict[str
         leader_change = _safe_float(board.get("领涨股票-涨跌幅", 0))
         leader_name = board.get("领涨股票", "")
 
-        # 热度重叠：概念板块的领涨股是否在人气榜中
-        # 简化计算：领涨股在人气榜中 +1
+        # 热度重叠：概念板块的领涨股是否在人气榜/涨停池中
         leader_code = board.get("领涨股票-代码", "")
         hot_overlap = 1.0 if str(leader_code) in hot_codes else 0.0
+        zt_overlap = 1.0 if str(leader_code) in zt_codes else 0.0
 
-        # 归一化评分
-        score = change_pct * 0.4 + leader_change * 0.3 + hot_overlap * 30 * 0.3
+        # 归一化评分：涨幅×0.35 + 龙头涨幅×0.25 + 人气重叠×0.2 + 涨停重叠×0.2
+        score = (change_pct * 0.35 + leader_change * 0.25 +
+                 hot_overlap * 30 * 0.2 + zt_overlap * 30 * 0.2)
 
         ranked.append({
             "name": name,

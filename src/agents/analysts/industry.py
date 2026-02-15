@@ -59,6 +59,30 @@ def _build_industry_context(stock: StockData) -> str:
             if len(pf_vals) >= 1:
                 lines.append(f"- 净利增速: {pf_vals.iloc[-1]:.1f}%")
 
+    # 同行业个股对比
+    peers = info.get("industry_peers", [])
+    if peers:
+        industry = info.get("industry", "")
+        lines.append(f"\n### 同行业个股 ({industry}, {len(peers)}只)")
+        lines.append("代码 | 名称 | 涨跌% | PE | PB | 换手率%")
+        lines.append("---|---|---|---|---|---")
+        for p in peers[:15]:  # 取前15
+            sym = p.get("symbol", "")
+            nm = p.get("name", "")
+            chg = float(p.get("change_pct", 0) or 0)
+            pe = p.get("pe", "-")
+            pb = p.get("pb", "-")
+            tr = p.get("turnover_rate", "-")
+            lines.append(f"{sym} | {nm} | {chg:+.1f} | {pe} | {pb} | {tr}")
+
+        # 行业均值
+        pe_vals = [float(p.get("pe", 0) or 0) for p in peers if p.get("pe") and float(p.get("pe", 0) or 0) > 0]
+        pb_vals = [float(p.get("pb", 0) or 0) for p in peers if p.get("pb") and float(p.get("pb", 0) or 0) > 0]
+        if pe_vals:
+            lines.append(f"\n行业PE均值: {sum(pe_vals)/len(pe_vals):.1f}, 中位数: {sorted(pe_vals)[len(pe_vals)//2]:.1f}")
+        if pb_vals:
+            lines.append(f"行业PB均值: {sum(pb_vals)/len(pb_vals):.1f}, 中位数: {sorted(pb_vals)[len(pb_vals)//2]:.1f}")
+
     if not lines:
         lines.append("基础数据有限，请基于你对该行业的知识进行分析")
 

@@ -287,6 +287,63 @@ def _build_segment_forecast_context(stock: StockData) -> tuple[str, dict]:
     return "", {}
 
 
+def _build_dividend_context(stock: StockData) -> str:
+    """构建分红回报上下文供LLM阅读"""
+    div = stock.info.get("dividend_history", [])
+    if not div:
+        return ""
+    lines = ["### 历史分红"]
+    for d in div[-5:]:  # 最近5年
+        yield_str = f"股息率{float(d.get('dividend_yield', 0) or 0):.2f}%" if d.get("dividend_yield") else ""
+        payout = d.get("payout_ratio")
+        payout_str = f"派息率{payout}%" if pd.notna(payout) else ""
+        lines.append(
+            f"  {d.get('report_date', '')}: "
+            f"每股{float(d.get('div_per_share', 0) or 0):.2f}元 "
+            f"{yield_str} {payout_str}"
+        )
+    # 计算近3年平均股息率
+    recent_yields = [float(d.get("dividend_yield", 0) or 0) for d in div[-3:] if d.get("dividend_yield")]
+    if recent_yields:
+        avg_yield = sum(recent_yields) / len(recent_yields)
+        lines.append(f"  近{len(recent_yields)}年平均股息率: {avg_yield:.2f}%")
+    return "\n".join(lines)
+
+
+def _build_peer_valuation_context(stock: StockData) -> str:
+    """构建同行业估值对比上下文"""
+    peers = stock.info.get("industry_peers", [])
+    if not peers:
+        return ""
+
+    industry = stock.info.get("industry", "")
+    pe_vals = [float(p.get("pe", 0) or 0) for p in peers if p.get("pe") and float(p.get("pe", 0) or 0) > 0]
+    pb_vals = [float(p.get("pb", 0) or 0) for p in peers if p.get("pb") and float(p.get("pb", 0) or 0) > 0]
+
+    lines = [f"\n### 同行业估值对比 ({industry}, {len(peers)}家)"]
+    if pe_vals:
+        pe_avg = sum(pe_vals) / len(pe_vals)
+        pe_med = sorted(pe_vals)[len(pe_vals) // 2]
+        lines.append(f"- 行业PE: 均值{pe_avg:.1f}, 中位数{pe_med:.1f}")
+    if pb_vals:
+        pb_avg = sum(pb_vals) / len(pb_vals)
+        pb_med = sorted(pb_vals)[len(pb_vals) // 2]
+        lines.append(f"- 行业PB: 均值{pb_avg:.1f}, 中位数{pb_med:.1f}")
+
+    # Top5 by market cap
+    lines.append("\n同行TOP5:")
+    lines.append("名称 | PE | PB | 涨跌%")
+    lines.append("---|---|---|---")
+    for p in peers[:5]:
+        nm = p.get("name", "")
+        pe = p.get("pe", "-")
+        pb = p.get("pb", "-")
+        chg = float(p.get("change_pct", 0) or 0)
+        lines.append(f"{nm} | {pe} | {pb} | {chg:+.1f}")
+
+    return "\n".join(lines)
+
+
 def _build_valuation_trend(val_df: pd.DataFrame) -> str:
     """构建估值历史趋势（近6个月月度快照）"""
     if val_df.empty or "date" not in val_df.columns:
@@ -437,7 +494,8 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
                 pe_ttm, pb, pe_pct, pb_pct, profit_yoy, val_days,
             ),
             "valuation_trend": _build_valuation_trend(val_df),
-            "segment_forecast_context": segment_context + warnings_text,
+            "dividend_context": _build_dividend_context(stock),
+            "segment_forecast_context": segment_context + _build_peer_valuation_context(stock) + warnings_text,
             "research_context": get_research_context(stock, "valuation"),
         },
         code_score=code_score,

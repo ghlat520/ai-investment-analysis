@@ -206,6 +206,61 @@ def _score_financial_health(df: pd.DataFrame) -> tuple[int, list[str]]:
     return score, factors
 
 
+def _score_earnings_quality(df: pd.DataFrame) -> tuple[int, list[str]]:
+    """盈利质量评分：扣非净利润 vs 归母净利润 (权重10%)
+
+    如果扣非/归母比值过低，说明利润靠非经常性损益撑着。
+    """
+    if df.empty:
+        return 0, ["无盈利质量数据"]
+
+    latest = df.iloc[-1]
+    net_profit = latest.get("net_profit")
+    deducted = latest.get("net_profit_deducted")
+
+    if net_profit is None or deducted is None:
+        return 0, ["无扣非净利润数据"]
+
+    # 处理NaN
+    try:
+        net_profit = float(net_profit)
+        deducted = float(deducted)
+    except (TypeError, ValueError):
+        return 0, ["扣非净利润数据格式异常"]
+
+    if np.isnan(net_profit) or np.isnan(deducted):
+        return 0, ["无扣非净利润数据"]
+
+    factors = []
+    score = 0
+
+    if net_profit > 0:
+        ratio = deducted / net_profit
+        if ratio > 0.9:
+            score += 8
+            factors.append(f"扣非/归母={ratio:.0%} 盈利质量优(极少非经常性损益)")
+        elif ratio > 0.7:
+            score += 3
+            factors.append(f"扣非/归母={ratio:.0%} 盈利质量中")
+        elif ratio > 0.5:
+            score -= 3
+            factors.append(f"扣非/归母={ratio:.0%} 非经常性损益占比较高")
+        else:
+            score -= 8
+            factors.append(f"扣非/归母={ratio:.0%} 利润严重依赖非经常性损益")
+    elif net_profit < 0 and deducted < 0:
+        if abs(deducted) > abs(net_profit) * 1.2:
+            score -= 5
+            factors.append("扣非亏损大于报表亏损，主业更差")
+        else:
+            factors.append("公司亏损中，扣非口径差异不大")
+    elif net_profit > 0 and deducted < 0:
+        score -= 10
+        factors.append("报表盈利但扣非亏损！主业实质亏损，利润全靠非经常性损益")
+
+    return score, factors
+
+
 def _score_cash_quality(df: pd.DataFrame) -> tuple[int, list[str]]:
     """现金流质量评分 (权重15%)"""
     if df.empty:
@@ -344,8 +399,13 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
     total_score += cash_score
     all_factors.extend(cash_factors)
 
+    eq_score, eq_factors = _score_earnings_quality(df)
+    total_score += eq_score
+    all_factors.extend(eq_factors)
+
     # 代码评分（-100 ~ +100）
-    code_score = max(-100, min(100, int(total_score * 100 / 77)))
+    # 满分约85（盈利30+成长24+健康13+现金10+盈利质量8），归一化到100
+    code_score = max(-100, min(100, int(total_score * 100 / 85)))
 
     # 置信度：基于财报期数
     num_reports = len(df)
@@ -357,6 +417,8 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
         all_risks.append("资产负债率超过70%，偿债风险较高")
     if latest.get("profit_yoy", 0) < -30:
         all_risks.append("净利润同比大幅下降超30%")
+    if eq_score <= -8:
+        all_risks.append("盈利质量差：利润严重依赖非经常性损益")
 
     # --- LLM增强（可选，扩大范围至±40）---
     from ..llm_enhance import llm_enhance
@@ -412,6 +474,7 @@ def analyze_fundamental(stock: StockData) -> AgentSignal:
                 "growth": grow_score,
                 "financial_health": health_score,
                 "cash_quality": cash_score,
+                "earnings_quality": eq_score,
             },
             "num_reports": num_reports,
             # V2新增字段（从LLM raw_response提取）

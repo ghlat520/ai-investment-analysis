@@ -131,6 +131,58 @@ class DataSourceManager:
         """获取券商盈利预测/一致预期"""
         return self._call_with_fallback("fetch_profit_forecast", symbol=symbol)
 
+    def fetch_shareholder_count(self, symbol: str) -> pd.DataFrame:
+        """获取股东人数变化历史"""
+        return self._call_with_fallback("fetch_shareholder_count", symbol=symbol)
+
+    def fetch_northbound_holdings(self, symbol: str) -> pd.DataFrame:
+        """获取北向资金持股"""
+        return self._call_with_fallback("fetch_northbound_holdings", symbol=symbol)
+
+    def fetch_dividend_history(self, symbol: str) -> pd.DataFrame:
+        """获取分红送配历史"""
+        return self._call_with_fallback("fetch_dividend_history", symbol=symbol)
+
+    def fetch_dragon_tiger(self, symbol: str, days: int = 90) -> pd.DataFrame:
+        """获取龙虎榜+大宗交易"""
+        return self._call_with_fallback("fetch_dragon_tiger", symbol=symbol, days=days)
+
+    def fetch_margin_data(self, symbol: str) -> pd.DataFrame:
+        """获取融资融券数据"""
+        return self._call_with_fallback("fetch_margin_data", symbol=symbol)
+
+    def fetch_performance_forecast(self, report_date: str = "") -> pd.DataFrame:
+        """获取全市场业绩预告"""
+        return self._call_with_fallback("fetch_performance_forecast", report_date=report_date)
+
+    def fetch_hot_rank(self) -> pd.DataFrame:
+        """获取人气排名Top100"""
+        return self._call_with_fallback("fetch_hot_rank")
+
+    def fetch_zt_pool(self, date: str = "") -> pd.DataFrame:
+        """获取涨停池"""
+        return self._call_with_fallback("fetch_zt_pool", date=date)
+
+    def fetch_industry_peers(self, symbol: str, industry: str = "") -> pd.DataFrame:
+        """获取同行业个股"""
+        return self._call_with_fallback("fetch_industry_peers", symbol=symbol, industry=industry)
+
+    def fetch_research_reports(self, symbol: str) -> dict:
+        """获取个股研报数据（auto-fallback）"""
+        for source in self._sources:
+            if not source.is_available():
+                continue
+            try:
+                result = source.fetch_research_reports(symbol=symbol)
+                if result:
+                    logger.debug(f"[{source.name}].fetch_research_reports 成功")
+                    return result
+            except NotImplementedError:
+                continue
+            except Exception as e:
+                source.mark_failed(e)
+        return {}
+
     def fetch_batch_financial(self, report_date: str = "") -> pd.DataFrame:
         """获取全市场批量财务数据"""
         return self._call_with_fallback("fetch_batch_financial", report_date=report_date)

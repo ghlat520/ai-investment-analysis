@@ -134,6 +134,53 @@ def _score_news_recency(news: list[dict[str, Any]]) -> tuple[int, str]:
     return -5, "近3日无新闻（信息滞后）"
 
 
+def _score_market_attention(stock: Any) -> tuple[int, str]:
+    """市场关注度评分：人气排名 + 业绩预告
+
+    人气排名Top100 = 市场关注高（正面信号）
+    业绩预告类型影响情绪：预增/预盈 正面，预减/预亏 负面
+    """
+    score = 0
+    parts = []
+
+    # 人气排名
+    hot = getattr(stock, "info", {}).get("hot_rank", {})
+    if hot:
+        rank = hot.get("rank", 0)
+        if rank <= 20:
+            score += 8
+            parts.append(f"人气榜第{rank}名(高度关注)")
+        elif rank <= 50:
+            score += 5
+            parts.append(f"人气榜第{rank}名")
+        else:
+            score += 3
+            parts.append(f"人气榜第{rank}名(一般关注)")
+
+    # 业绩预告
+    forecast = getattr(stock, "info", {}).get("performance_forecast", {})
+    if forecast:
+        ftype = forecast.get("forecast_type", "")
+        chg = forecast.get("change_pct", 0)
+        if "预增" in ftype or "预盈" in ftype:
+            score += 10
+            parts.append(f"业绩{ftype}(预计变动{chg:+.0f}%)")
+        elif "略增" in ftype:
+            score += 5
+            parts.append(f"业绩{ftype}")
+        elif "预减" in ftype or "预亏" in ftype:
+            score -= 15
+            parts.append(f"业绩{ftype}(预计变动{chg:+.0f}%)")
+        elif "略减" in ftype:
+            score -= 5
+            parts.append(f"业绩{ftype}")
+        elif "续亏" in ftype or "首亏" in ftype:
+            score -= 20
+            parts.append(f"业绩{ftype}")
+
+    return max(-25, min(15, score)), "; ".join(parts) if parts else "无人气/预告数据"
+
+
 def _detect_major_events(news: list[dict[str, Any]]) -> tuple[int, str, list[str]]:
     """重大事件检测
 
@@ -327,16 +374,21 @@ def analyze_sentiment(stock: StockData) -> AgentSignal:
     scores.append(event_score)
     factors.append(f"重大事件: {event_desc}")
 
+    attention_score, attention_desc = _score_market_attention(stock)
+    scores.append(attention_score)
+    factors.append(f"市场关注: {attention_desc}")
+
     # 代码评分（-100 ~ +100）
     total = sum(scores)
-    # 满分约65 (25+5+5+30)，归一化到100
-    code_score = max(-100, min(100, int(total * 100 / 65)))
+    # 满分约80 (25+5+5+30+15)，归一化到100
+    code_score = max(-100, min(100, int(total * 100 / 80)))
 
     component_scores = {
         "keyword_sentiment": kw_score,
         "news_volume": vol_score,
         "news_recency": recency_score,
         "major_events": event_score,
+        "market_attention": attention_score,
     }
 
     # 风险提示

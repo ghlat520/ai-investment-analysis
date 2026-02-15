@@ -176,6 +176,66 @@ def extract_research_summaries(
         return {}
 
 
+def _build_online_research_context(stock: Any, agent_name: str) -> str:
+    """从在线采集的研报数据构建上下文文本"""
+    reports = getattr(stock, "info", {}).get("research_reports", {})
+    if not reports:
+        return ""
+
+    parts = []
+
+    if agent_name in ("sentiment", "valuation", "fundamental", "moat"):
+        # 机构一致评级
+        rating_dist = reports.get("rating_distribution", {})
+        if rating_dist:
+            total = reports.get("total_reports", sum(rating_dist.values()))
+            coverage = reports.get("coverage_count", 0)
+            dist_str = ", ".join(f"{k}{v}条" for k, v in rating_dist.items())
+            parts.append(f"**机构覆盖**: {coverage}家券商, 近期{total}篇研报")
+            parts.append(f"**评级分布**: {dist_str}")
+
+        # 评级变动
+        changes = reports.get("rating_changes", {})
+        if changes:
+            change_str = ", ".join(f"{k}{v}条" for k, v in changes.items())
+            parts.append(f"**评级变动**: {change_str}")
+
+        # 机构参与度
+        participation = reports.get("latest_participation")
+        if participation is not None:
+            parts.append(f"**机构参与度**: {participation:.1f}%")
+
+    if agent_name == "sentiment":
+        # 研报标题（机构观点信号）
+        titles = reports.get("recent_titles", [])
+        if titles:
+            parts.append("\n**近期研报标题**:")
+            for t in titles[:8]:
+                inst = t.get("institution", "")
+                rating = t.get("rating", "")
+                date = t.get("date", "")
+                title = t.get("title", "")
+                parts.append(f"- [{date}] {inst}({rating}): {title}")
+
+    if agent_name == "valuation":
+        # EPS预测（交叉验证）
+        eps_forecasts = reports.get("eps_forecasts", [])
+        if eps_forecasts:
+            parts.append("\n**各券商EPS预测（交叉验证用）**:")
+            parts.append("| 机构 | 日期 | " + " | ".join(
+                k for k in eps_forecasts[0].keys() if k not in ("institution", "date")
+            ) + " |")
+            parts.append("|" + "---|" * (len(eps_forecasts[0])) )
+            for f in eps_forecasts[:5]:
+                eps_vals = " | ".join(
+                    str(round(v, 3)) if isinstance(v, float) else str(v)
+                    for k, v in f.items() if k not in ("institution", "date")
+                )
+                parts.append(f"| {f.get('institution', '')} | {f.get('date', '')} | {eps_vals} |")
+
+    return "\n".join(parts) if parts else ""
+
+
 def get_research_context(stock: Any, agent_name: str) -> str:
     """各 Agent 调用入口，获取自己维度的研报摘要
 
@@ -186,13 +246,20 @@ def get_research_context(stock: Any, agent_name: str) -> str:
     Returns:
         该维度的研报摘要文本，无研报时返回空字符串
     """
+    parts = []
+
+    # 1. PDF 研报摘要（手动上传）
     dimension = _AGENT_TO_DIMENSION.get(agent_name, "")
-    if not dimension:
-        return ""
+    if dimension:
+        summaries = getattr(stock, "info", {}).get("research_summaries", {})
+        if summaries:
+            text = summaries.get(dimension, "")
+            if text:
+                parts.append(text)
 
-    summaries = getattr(stock, "info", {}).get("research_summaries", {})
-    if not summaries:
-        return ""
+    # 2. 在线研报数据（自动采集）
+    online_ctx = _build_online_research_context(stock, agent_name)
+    if online_ctx:
+        parts.append(online_ctx)
 
-    text = summaries.get(dimension, "")
-    return text if text else ""
+    return "\n\n".join(parts) if parts else ""

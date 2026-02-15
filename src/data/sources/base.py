@@ -113,3 +113,75 @@ class BaseDataSource(ABC):
         返回：year, institution, eps, profit, revenue 等
         """
         raise NotImplementedError(f"{self.name} 不支持券商盈利预测")
+
+    def fetch_shareholder_count(self, symbol: str) -> pd.DataFrame:
+        """获取股东人数变化历史
+
+        返回：date, count, change_pct, avg_market_value, total_market_cap
+        """
+        raise NotImplementedError(f"{self.name} 不支持股东人数数据")
+
+    def fetch_northbound_holdings(self, symbol: str) -> pd.DataFrame:
+        """获取北向资金持股（个股）
+
+        返回：date, hold_shares, hold_market_value, hold_ratio_float, change_shares
+        """
+        raise NotImplementedError(f"{self.name} 不支持北向资金数据")
+
+    def fetch_dividend_history(self, symbol: str) -> pd.DataFrame:
+        """获取分红送配历史
+
+        返回：report_date, div_per_share, dividend_yield, eps, payout_ratio, ex_date
+        """
+        raise NotImplementedError(f"{self.name} 不支持分红历史数据")
+
+    def fetch_dragon_tiger(self, symbol: str, days: int = 90) -> pd.DataFrame:
+        """获取龙虎榜+大宗交易（合并）
+
+        返回：date, source, net_buy_amount, buy_amount, sell_amount, premium_rate, reason
+        """
+        raise NotImplementedError(f"{self.name} 不支持龙虎榜数据")
+
+    def fetch_research_reports(self, symbol: str) -> dict:
+        """获取个股研报数据（评级+EPS预测+机构覆盖+机构参与度）
+
+        返回：dict，包含 rating_distribution, coverage_count, eps_forecasts,
+        recent_titles, institutional_participation 等字段
+        """
+        raise NotImplementedError(f"{self.name} 不支持个股研报数据")
+
+    def fetch_margin_data(self, symbol: str) -> pd.DataFrame:
+        """获取个股融资融券数据
+
+        返回：date, margin_buy, margin_balance, short_sell, short_balance, total_balance
+        """
+        raise NotImplementedError(f"{self.name} 不支持融资融券数据")
+
+    def fetch_performance_forecast(self, report_date: str = "") -> pd.DataFrame:
+        """获取全市场业绩预告（批量）
+
+        返回：symbol, name, forecast_type, change_pct, forecast_content, announce_date
+        """
+        raise NotImplementedError(f"{self.name} 不支持业绩预告")
+
+    def fetch_hot_rank(self) -> pd.DataFrame:
+        """获取人气排名Top100
+
+        返回：rank, symbol, name, price, change_pct
+        """
+        raise NotImplementedError(f"{self.name} 不支持人气排名")
+
+    def fetch_zt_pool(self, date: str = "") -> pd.DataFrame:
+        """获取涨停池
+
+        返回：symbol, name, change_pct, price, amount, seal_amount, first_time, last_time,
+        zt_count, continuous, industry
+        """
+        raise NotImplementedError(f"{self.name} 不支持涨停池")
+
+    def fetch_industry_peers(self, symbol: str) -> pd.DataFrame:
+        """获取同行业个股（行业成分股）
+
+        返回：symbol, name, price, change_pct, pe, pb, turnover_rate
+        """
+        raise NotImplementedError(f"{self.name} 不支持行业成分股")
