@@ -2,6 +2,7 @@
 分析结果持久化
 
 将采集的数据和分析结果保存到数据库。
+P1优化：集成预测验证闭环。
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from .models import (
     AnalysisResult,
     FusionDecisionRecord,
     InvestmentReport,
+    PredictionRecord,
     StockDailyQuote,
     StockFinancialData,
     StockInfo,
@@ -131,6 +133,8 @@ def _save_financial_data(session, symbol: str, records: list[dict[str, Any]]) ->
 def persist_analysis(state: dict[str, Any]) -> str:
     """将完整分析结果持久化到数据库
 
+    P1优化：同时记录预测到 prediction_records 表，用于后续验证闭环。
+
     Returns: run_id
     """
     db = get_database()
@@ -141,6 +145,14 @@ def persist_analysis(state: dict[str, Any]) -> str:
     fusion = state.get("fusion")
     report = state.get("report", "")
     run_id = str(uuid4())
+
+    # 提取当前价格（用于预测验证）
+    current_price = None
+    if stock and stock.daily_quotes:
+        # 取最新收盘价
+        latest_quote = stock.daily_quotes[-1] if isinstance(stock.daily_quotes, list) else None
+        if latest_quote:
+            current_price = latest_quote.get("close")
 
     with db.session() as session:
         # 1. 股票基本信息
@@ -199,7 +211,30 @@ def persist_analysis(state: dict[str, Any]) -> str:
                 created_at=datetime.now(),
             ))
 
-        # 6. 研报
+            # 6. P1新增：记录预测（用于验证闭环）
+            divergence_points = list(fusion.divergence_points) if fusion.divergence_points else []
+            target_prices = fusion.target_prices if fusion.target_prices else {}
+            agent_scores = fusion.signal_summary if fusion.signal_summary else {}
+
+            prediction = PredictionRecord(
+                run_id=run_id,
+                symbol=symbol,
+                prediction_date=date.today(),
+                verification_date=date.today(),  # 将由ValidationService设置
+                final_score=fusion.final_score,
+                final_action=fusion.final_action,
+                confidence=fusion.confidence,
+                target_price_conservative=target_prices.get("conservative"),
+                target_price_base=target_prices.get("base"),
+                target_price_optimistic=target_prices.get("optimistic"),
+                current_price=current_price,
+                divergence_points=divergence_points if divergence_points else None,
+                agent_scores=agent_scores if agent_scores else None,
+                is_verified=False,
+            )
+            session.add(prediction)
+
+        # 7. 研报
         if report:
             session.add(InvestmentReport(
                 run_id=run_id,

@@ -560,5 +560,161 @@ def serve(host: str, port: int, do_reload: bool) -> None:
     )
 
 
+# ─── validate ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--days", default=30, help="验证最近N天到期的预测")
+@click.option("--stock", default=None, help="只验证特定股票")
+@click.option("--auto-verify", is_flag=True, help="自动获取最新价格并验证")
+def validate(days: int, stock: str | None, auto_verify: bool) -> None:
+    """预测验证：检查待验证的预测并执行验证"""
+    from src.services.validation_service import get_validation_service
+
+    svc = get_validation_service()
+
+    # 1. 显示待验证的预测
+    pending = svc.get_pending_verifications(days_overdue=days)
+
+    if not pending:
+        click.echo(f"最近{days}天内无待验证的预测记录")
+        return
+
+    click.echo(f"\n=== 待验证预测 ({len(pending)}条) ===")
+    click.echo(f"{'ID':>5} {'代码':<12} {'预测日':<12} {'验证日':<12} {'评分':>6} {'操作':<8}")
+    click.echo("-" * 60)
+
+    for r in pending:
+        click.echo(
+            f"{r.id:>5} {r.symbol:<12} {str(r.prediction_date):<12} "
+            f"{str(r.verification_date):<12} {r.final_score:>+6d} {r.final_action:<8}"
+        )
+
+    if not auto_verify:
+        click.echo(f"\n提示: 使用 --auto-verify 自动获取最新价格并验证")
+        return
+
+    # 2. 自动验证
+    click.echo(f"\n=== 开始自动验证 ===")
+
+    from src.data.sources.manager import DataSourceManager
+    from src.data.collectors.quote_collector import QuoteCollector
+
+    source_mgr = DataSourceManager()
+    quote_collector = QuoteCollector(source_mgr)
+
+    verified_count = 0
+    for r in pending:
+        try:
+            # 获取最新价格
+            quotes = quote_collector.collect_daily_quotes(r.symbol, days=5)
+            if not quotes:
+                click.echo(f"  [{r.symbol}] 无法获取最新价格，跳过")
+                continue
+
+            latest_price = float(quotes[-1].get("close", 0))
+            if latest_price <= 0:
+                click.echo(f"  [{r.symbol}] 价格数据异常，跳过")
+                continue
+
+            # 执行验证
+            result = svc.verify_prediction(r.id, latest_price)
+
+            direction_icon = "✓" if result["direction_correct"] else "✗"
+            click.echo(
+                f"  [{r.symbol}] 预测{r.final_score:+d} → 实际{return['actual_return_pct']:+.2f}% "
+                f"方向:{direction_icon} 目标价:{result['price_target_hit']}"
+            )
+            verified_count += 1
+
+        except Exception as e:
+            click.echo(f"  [{r.symbol}] 验证失败: {e}")
+
+    click.echo(f"\n验证完成: {verified_count}/{len(pending)}")
+
+
+@main.command("validation-stats")
+@click.option("--days", default=90, help="统计最近N天的验证结果")
+@click.option("--stock", default=None, help="只统计特定股票")
+@click.option("--agent", default=None, help="只统计特定Agent")
+def validation_stats(days: int, stock: str | None, agent: str | None) -> None:
+    """预测准确性统计：分析历史验证结果"""
+    from src.services.validation_service import get_validation_service
+
+    svc = get_validation_service()
+    stats = svc.get_accuracy_statistics(symbol=stock, days=days, agent_name=agent)
+
+    if stats.get("total", 0) == 0:
+        click.echo("无已验证的预测记录")
+        return
+
+    click.echo(f"\n=== 预测准确性统计 (最近{days}天) ===")
+    click.echo(f"总验证数: {stats['total']}")
+    click.echo(f"方向准确率: {stats['direction_accuracy']:.1f}%")
+    click.echo(f"平均收益率: {stats['avg_return']:+.2f}%")
+
+    # 按评分区间统计
+    click.echo(f"\n=== 按评分区间统计 ===")
+    click.echo(f"{'区间':<20} {'数量':>6} {'准确率':>8} {'平均收益':>10}")
+    click.echo("-" * 50)
+
+    for bin_name, bin_data in stats["score_bins"].items():
+        if bin_data["count"] > 0:
+            click.echo(
+                f"{bin_name:<20} {bin_data['count']:>6} "
+                f"{bin_data.get('accuracy', 0):>7.1f}% "
+                f"{bin_data['avg_return']:>+9.2f}%"
+            )
+
+    # Agent统计
+    if stats.get("agent_stats"):
+        click.echo(f"\n=== Agent准确性统计 ===")
+        click.echo(f"{'Agent':<20} {'验证数':>6} {'准确率':>8} {'贡献度':>10}")
+        click.echo("-" * 50)
+
+        for an, an_data in sorted(
+            stats["agent_stats"].items(),
+            key=lambda x: x[1].get("accuracy", 0),
+            reverse=True
+        ):
+            click.echo(
+                f"{an:<20} {an_data['count']:>6} "
+                f"{an_data.get('accuracy', 0):>7.1f}% "
+                f"{an_data['total_contribution']:>+9.1f}"
+            )
+
+
+@main.command("error-analysis")
+@click.option("--record-id", required=True, type=int, help="预测记录ID")
+def error_analysis(record_id: int) -> None:
+    """错误分析：分析单个预测错误的原因"""
+    from src.services.validation_service import get_validation_service
+
+    svc = get_validation_service()
+    report = svc.generate_error_report(record_id)
+
+    if "error" in report:
+        click.echo(f"错误: {report['error']}")
+        return
+
+    if report.get("status"):
+        click.echo(report["status"])
+        return
+
+    click.echo(f"\n=== 错误分析报告 ===")
+    click.echo(f"股票: {report['symbol']}")
+    click.echo(f"预测日期: {report['prediction_date']}")
+    click.echo(f"预测评分: {report['final_score']:+d}")
+    click.echo(f"实际收益: {report['actual_return_pct']:+.2f}%")
+    click.echo(f"错误类型: {report['error_type']}")
+
+    if report.get("wrong_agents"):
+        click.echo(f"\n判断错误的Agent: {', '.join(report['wrong_agents'])}")
+
+    if report.get("suggested_fixes"):
+        click.echo(f"\n=== 建议修复措施 ===")
+        for fix in report["suggested_fixes"]:
+            click.echo(f"  - {fix}")
+
+
 if __name__ == "__main__":
     main()

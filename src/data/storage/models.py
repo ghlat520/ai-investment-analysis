@@ -215,3 +215,56 @@ class LLMCostLog(Base):
     latency_ms: Mapped[Optional[int]] = mapped_column(Integer)
     is_cached: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class PredictionRecord(Base):
+    """预测记录表 - 用于验证闭环"""
+    __tablename__ = "prediction_records"
+    __table_args__ = (UniqueConstraint("run_id", "symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # 预测时间
+    prediction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    verification_date: Mapped[Optional[date]] = mapped_column(Date)  # 计划验证日期
+
+    # 预测内容
+    final_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    final_action: Mapped[str] = mapped_column(String(20), nullable=False)
+    confidence: Mapped[float] = mapped_column(Numeric(4, 3), nullable=False)
+
+    # 目标价预测
+    target_price_conservative: Mapped[Optional[float]] = mapped_column(Numeric(12, 4))
+    target_price_base: Mapped[Optional[float]] = mapped_column(Numeric(12, 4))
+    target_price_optimistic: Mapped[Optional[float]] = mapped_column(Numeric(12, 4))
+    current_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 4))  # 预测时的价格
+
+    # 分歧点（关键假设）
+    divergence_points: Mapped[Optional[dict]] = mapped_column(JSON)  # [{point, verify_method, verify_date}]
+
+    # Agent评分快照
+    agent_scores: Mapped[Optional[dict]] = mapped_column(JSON)  # {agent_name: score}
+
+    # 验证结果（后续更新）
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # 实际结果
+    actual_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 4))  # 验证时的价格
+    actual_return_pct: Mapped[Optional[float]] = mapped_column(Numeric(8, 4))  # 实际收益率
+    price_target_hit: Mapped[Optional[str]] = mapped_column(String(20))  # conservative/base/optimistic/miss
+
+    # 预测准确性
+    direction_correct: Mapped[Optional[bool]] = mapped_column(Boolean)  # 方向是否正确
+    score_accuracy: Mapped[Optional[float]] = mapped_column(Numeric(4, 3))  # 评分准确性指标
+
+    # Agent准确性归因
+    agent_accuracy: Mapped[Optional[dict]] = mapped_column(JSON)  # {agent_name: {correct: bool, contribution: float}}
+
+    # 错误分析
+    error_analysis: Mapped[Optional[dict]] = mapped_column(JSON)  # {root_cause, lessons, suggested_fix}
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
