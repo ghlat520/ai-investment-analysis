@@ -1,43 +1,46 @@
 # 信号权重配置
 # 根据市场环境动态选择权重方案
-# 10个Agent权重（P1新增competition）
+# 11个Agent权重（P2新增management）
 
 market_regimes:
   bull:  # 牛市：趋势和资金更重要
-    technical: 0.14
-    fundamental: 0.06
-    valuation: 0.06
-    money_flow: 0.14
-    sentiment: 0.10
-    moat: 0.07
-    business_model: 0.07
-    industry: 0.12
-    supply_chain: 0.10
-    competition: 0.14  # 新增：牛市重视竞争格局
-
-  bear:  # 熊市：价值和护城河更重要
-    technical: 0.07
-    fundamental: 0.12
-    valuation: 0.14
-    money_flow: 0.06
-    sentiment: 0.04
-    moat: 0.14
-    business_model: 0.12
+    technical: 0.12
+    fundamental: 0.05
+    valuation: 0.05
+    money_flow: 0.12
+    sentiment: 0.09
+    moat: 0.06
+    business_model: 0.06
     industry: 0.10
     supply_chain: 0.09
-    competition: 0.12  # 新增：熊市重视竞争护城河
+    competition: 0.12
+    management: 0.14  # 新增：管理层质量在牛市更关键（增长执行）
+
+  bear:  # 熊市：价值和护城河更重要
+    technical: 0.06
+    fundamental: 0.10
+    valuation: 0.12
+    money_flow: 0.05
+    sentiment: 0.03
+    moat: 0.12
+    business_model: 0.10
+    industry: 0.09
+    supply_chain: 0.08
+    competition: 0.10
+    management: 0.15  # 新增：熊市更看重管理层风控能力
 
   neutral:  # 震荡：均衡配置
-    technical: 0.09
-    fundamental: 0.12
-    valuation: 0.12
-    money_flow: 0.07
-    sentiment: 0.06
-    moat: 0.11
-    business_model: 0.10
-    industry: 0.10
-    supply_chain: 0.10
-    competition: 0.13  # 新增：竞争格局是重要参考
+    technical: 0.08
+    fundamental: 0.10
+    valuation: 0.10
+    money_flow: 0.06
+    sentiment: 0.05
+    moat: 0.10
+    business_model: 0.09
+    industry: 0.09
+    supply_chain: 0.09
+    competition: 0.11
+    management: 0.13  # 新增：管理层质量是长期价值核心
 
 # 默认权重
 default: neutral
@@ -61,3 +64,9 @@ veto_rules:
   - condition: ipo_days_lt_60
     action: skip
     reason: "次新股波动大，暂不分析"
+
+  # 新增：管理层风险否决规则
+  - condition: management_red_flag
+    action: cap_score
+    max_score: -30
+    reason: "管理层存在重大风险信号（如财务造假、大额减持等）"

@@ -123,6 +123,17 @@ agents:
     prompt_template: prompts/competition.md
     llm_mode: primary
 
+  management:
+    enabled: true
+    display_name: "管理层质量分析"
+    llm_provider: ollama
+    llm_model: qwen2.5:14b
+    temperature: 0.3
+    max_tokens: 4000
+    timeout: 180
+    prompt_template: prompts/management.md
+    llm_mode: primary
+
   fusion:
     enabled: true
     display_name: "决策融合"

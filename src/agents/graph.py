@@ -2,12 +2,12 @@
 LangGraph 图编排
 
 定义分析流程的DAG：
-DataLoader → [技术面|基本面|估值|资金面|情绪面|护城河|商业模式|行业|产业链|竞争格局] (fan-out并行) → 决策融合 → 研报生成
+DataLoader → [技术面|基本面|估值|资金面|情绪面|护城河|商业模式|行业|产业链|竞争格局|管理层] (fan-out并行) → 决策融合 → 研报生成
 
-10-Agent完整版：
+11-Agent完整版：
 - 量化优先: technical, money_flow (LLM ±15微调)
 - 混合模式: fundamental, valuation, sentiment (LLM ±40深度增强)
-- LLM主导: moat, business_model, industry, supply_chain, competition (LLM直接评分)
+- LLM主导: moat, business_model, industry, supply_chain, competition, management (LLM直接评分)
 """
 
 from __future__ import annotations
@@ -185,6 +185,20 @@ def competition_analyst(state: dict[str, Any]) -> dict[str, Any]:
         return {"errors": [f"CompetitionAnalyst error: {e}"]}
 
 
+def management_analyst(state: dict[str, Any]) -> dict[str, Any]:
+    """管理层质量分析Agent"""
+    from .analysts.management import analyze_management
+
+    stock = state["stock"]
+    logger.info(f"[ManagementAnalyst] Analyzing {stock.symbol}")
+    try:
+        signal = analyze_management(stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[ManagementAnalyst] Error: {e}")
+        return {"errors": [f"ManagementAnalyst error: {e}"]}
+
+
 def fusion_agent(state: dict[str, Any]) -> dict[str, Any]:
     """决策融合Agent"""
     from .fusion.engine import fuse_signals
@@ -223,9 +237,9 @@ def build_analysis_graph() -> StateGraph:
     结构:
         data_loader
             ↓
-        ┌──┬──┬──┬──┬──┬──┬──┬──┬──┐  (fan-out: 并行)
-        技术 基本 估值 资金 情绪 护城河 商业 行业 产业链 竞争
-        └──┴──┴──┴──┴──┴──┴──┴──┴──┘  (fan-in: 汇聚)
+        ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐  (fan-out: 并行)
+        技术 基本 估值 资金 情绪 护城河 商业 行业 产业链 竞争 管理层
+        └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘  (fan-in: 汇聚)
             ↓
         fusion
             ↓
@@ -247,6 +261,7 @@ def build_analysis_graph() -> StateGraph:
         "industry": industry_analyst,
         "supply_chain": supply_chain_analyst,
         "competition": competition_analyst,
+        "management": management_analyst,
     }
 
     graph = StateGraph(AnalysisState)
