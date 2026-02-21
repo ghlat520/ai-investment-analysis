@@ -1,46 +1,49 @@
 # 信号权重配置
 # 根据市场环境动态选择权重方案
-# 11个Agent权重（P2新增management）
+# 12个Agent权重（P3新增esg）
 
 market_regimes:
-  bull:  # 牛市：趋势和资金更重要
-    technical: 0.12
+  bull:  # 牛市：趋势和资金更重要，ESG权重适中
+    technical: 0.11
     fundamental: 0.05
-    valuation: 0.05
-    money_flow: 0.12
-    sentiment: 0.09
-    moat: 0.06
-    business_model: 0.06
-    industry: 0.10
-    supply_chain: 0.09
-    competition: 0.12
-    management: 0.14  # 新增：管理层质量在牛市更关键（增长执行）
-
-  bear:  # 熊市：价值和护城河更重要
-    technical: 0.06
-    fundamental: 0.10
-    valuation: 0.12
-    money_flow: 0.05
-    sentiment: 0.03
-    moat: 0.12
-    business_model: 0.10
+    valuation: 0.04
+    money_flow: 0.11
+    sentiment: 0.08
+    moat: 0.05
+    business_model: 0.05
     industry: 0.09
     supply_chain: 0.08
-    competition: 0.10
-    management: 0.15  # 新增：熊市更看重管理层风控能力
+    competition: 0.11
+    management: 0.13
+    esg: 0.10  # P3新增：ESG在牛市关注可持续增长
+
+  bear:  # 熊市：价值、护城河和ESG更重要（规避风险）
+    technical: 0.05
+    fundamental: 0.09
+    valuation: 0.11
+    money_flow: 0.04
+    sentiment: 0.02
+    moat: 0.11
+    business_model: 0.09
+    industry: 0.08
+    supply_chain: 0.07
+    competition: 0.09
+    management: 0.14
+    esg: 0.11  # P3新增：熊市ESG风险更重要
 
   neutral:  # 震荡：均衡配置
-    technical: 0.08
-    fundamental: 0.10
-    valuation: 0.10
-    money_flow: 0.06
-    sentiment: 0.05
-    moat: 0.10
-    business_model: 0.09
-    industry: 0.09
-    supply_chain: 0.09
-    competition: 0.11
-    management: 0.13  # 新增：管理层质量是长期价值核心
+    technical: 0.07
+    fundamental: 0.09
+    valuation: 0.09
+    money_flow: 0.05
+    sentiment: 0.04
+    moat: 0.09
+    business_model: 0.08
+    industry: 0.08
+    supply_chain: 0.08
+    competition: 0.10
+    management: 0.12
+    esg: 0.11  # P3新增：ESG作为长期价值评估维度
 
 # 默认权重
 default: neutral
@@ -65,8 +68,14 @@ veto_rules:
     action: skip
     reason: "次新股波动大，暂不分析"
 
-  # 新增：管理层风险否决规则
+  # 管理层风险否决规则
   - condition: management_red_flag
     action: cap_score
     max_score: -30
     reason: "管理层存在重大风险信号（如财务造假、大额减持等）"
+
+  # P3新增：ESG重大风险否决规则
+  - condition: esg_critical_risk
+    action: cap_score
+    max_score: -40
+    reason: "ESG存在重大风险（如重大环保处罚、安全生产事故等）"

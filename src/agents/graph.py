@@ -2,12 +2,12 @@
 LangGraph 图编排
 
 定义分析流程的DAG：
-DataLoader → [技术面|基本面|估值|资金面|情绪面|护城河|商业模式|行业|产业链|竞争格局|管理层] (fan-out并行) → 决策融合 → 研报生成
+DataLoader → [技术面|基本面|估值|资金面|情绪面|护城河|商业模式|行业|产业链|竞争格局|管理层|ESG] (fan-out并行) → 决策融合 → 研报生成
 
-11-Agent完整版：
+12-Agent完整版：
 - 量化优先: technical, money_flow (LLM ±15微调)
 - 混合模式: fundamental, valuation, sentiment (LLM ±40深度增强)
-- LLM主导: moat, business_model, industry, supply_chain, competition, management (LLM直接评分)
+- LLM主导: moat, business_model, industry, supply_chain, competition, management, esg (LLM直接评分)
 """
 
 from __future__ import annotations
@@ -199,6 +199,20 @@ def management_analyst(state: dict[str, Any]) -> dict[str, Any]:
         return {"errors": [f"ManagementAnalyst error: {e}"]}
 
 
+def esg_analyst(state: dict[str, Any]) -> dict[str, Any]:
+    """ESG（环境、社会、治理）分析Agent"""
+    from .analysts.esg import analyze_esg
+
+    stock = state["stock"]
+    logger.info(f"[ESGAnalyst] Analyzing {stock.symbol}")
+    try:
+        signal = analyze_esg(stock)
+        return {"signals": [signal]}
+    except Exception as e:
+        logger.error(f"[ESGAnalyst] Error: {e}")
+        return {"errors": [f"ESGAnalyst error: {e}"]}
+
+
 def fusion_agent(state: dict[str, Any]) -> dict[str, Any]:
     """决策融合Agent"""
     from .fusion.engine import fuse_signals
@@ -237,9 +251,9 @@ def build_analysis_graph() -> StateGraph:
     结构:
         data_loader
             ↓
-        ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐  (fan-out: 并行)
-        技术 基本 估值 资金 情绪 护城河 商业 行业 产业链 竞争 管理层
-        └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘  (fan-in: 汇聚)
+        ┌──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┐  (fan-out: 并行)
+        技术 基本 估值 资金 情绪 护城河 商业 行业 产业链 竞争 管理层 ESG
+        └──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘  (fan-in: 汇聚)
             ↓
         fusion
             ↓
@@ -262,6 +276,7 @@ def build_analysis_graph() -> StateGraph:
         "supply_chain": supply_chain_analyst,
         "competition": competition_analyst,
         "management": management_analyst,
+        "esg": esg_analyst,
     }
 
     graph = StateGraph(AnalysisState)
