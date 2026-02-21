@@ -287,6 +287,121 @@ def _build_segment_forecast_context(stock: StockData) -> tuple[str, dict]:
     return "", {}
 
 
+def _merge_precision_warnings(
+    llm_warnings: list,
+    segment_result: dict,
+    data_warnings: list,
+    stock: "StockData",
+) -> list:
+    """合并 LLM 输出的 precision_warnings 与代码侧兜底检测。
+
+    即使 LLM 漏填，代码也会补上关键降级警告。
+    """
+    warnings = list(llm_warnings) if llm_warnings else []
+    existing_types = {w.get("type") for w in warnings if isinstance(w, dict)}
+
+    # 兜底1：无分业务数据
+    if not segment_result and "missing_segment_data" not in existing_types:
+        warnings.append({
+            "type": "missing_segment_data",
+            "severity": "high",
+            "message": "缺少分业务营收构成及前瞻预测数据，估值采用整体法",
+            "impact": "无法区分高增长与低增长业务线的差异化价值，整体PE/PEG可能高估或低估部分业务板块",
+            "suggestion": "关注公司年报中的分业务披露，或等待YAML精细模型配置后重新分析",
+        })
+
+    # 兜底2：数据滞后
+    for w in data_warnings:
+        if "行情数据距今" in w and "stale_data" not in existing_types:
+            warnings.append({
+                "type": "stale_data",
+                "severity": "medium",
+                "message": w,
+                "impact": "估值基于非最新行情，目标价与实际偏差可能较大",
+                "suggestion": "待开盘后获取最新行情再重新分析",
+            })
+            existing_types.add("stale_data")
+
+    # 兜底3：无券商研报覆盖
+    research = stock.info.get("research_reports", {})
+    has_research = bool(research.get("reports") or research.get("institution_count"))
+    if not has_research and "missing_research" not in existing_types:
+        warnings.append({
+            "type": "missing_research",
+            "severity": "medium",
+            "message": "无券商研报覆盖，缺少专业机构估值交叉验证",
+            "impact": "目标价仅基于量化模型推算，无法与卖方一致预期对比",
+            "suggestion": "参考同行业可比公司的券商覆盖情况辅助判断",
+        })
+
+    return warnings
+
+
+def _calc_auto_target_prices(
+    pe_ttm: float,
+    pe_history: pd.Series,
+    profit_yoy: float,
+    current_price: float,
+    forecast_eps: list[dict],
+) -> dict | None:
+    """无YAML时，代码用历史PE分位+前瞻EPS自动计算目标价
+
+    核心思想：用真实历史PE区间锚定，不依赖LLM猜PE。
+    - 保守PE = 历史正PE的25分位
+    - 中性PE = 历史正PE的50分位（中位数）
+    - 乐观PE = 历史正PE的75分位
+    - EPS优先用券商一致预期均值，否则用TTM EPS×(1+增速)外推
+    """
+    if np.isnan(pe_ttm) or pe_ttm <= 0 or current_price <= 0:
+        return None
+
+    positive_pe = pe_history[pe_history > 0].dropna()
+    if len(positive_pe) < 30:
+        return None  # 历史数据不足，不做自动计算
+
+    pe_conservative = float(positive_pe.quantile(0.25))
+    pe_neutral = float(positive_pe.quantile(0.50))
+    pe_optimistic = float(positive_pe.quantile(0.75))
+
+    # EPS: 优先券商一致预期，否则TTM外推
+    ttm_eps = current_price / pe_ttm
+    forward_eps = ttm_eps  # 默认
+
+    if forecast_eps:
+        # 取最近预测年的均值EPS
+        for fc in forecast_eps:
+            eps_mean = fc.get("eps_mean")
+            if eps_mean and not np.isnan(float(eps_mean)) and float(eps_mean) > 0:
+                forward_eps = float(eps_mean)
+                break
+    elif not np.isnan(profit_yoy) and profit_yoy > 0:
+        forward_eps = ttm_eps * (1 + profit_yoy / 100)
+
+    # 三情景目标价
+    tp_conservative = round(forward_eps * pe_conservative, 2)
+    tp_neutral = round(forward_eps * pe_neutral, 2)
+    tp_optimistic = round(forward_eps * pe_optimistic, 2)
+    tp_weighted = round(
+        tp_conservative * 0.3 + tp_neutral * 0.4 + tp_optimistic * 0.3, 2
+    )
+
+    return {
+        "conservative": tp_conservative,
+        "base": tp_neutral,
+        "optimistic": tp_optimistic,
+        "probability_weighted": tp_weighted,
+        "_meta": {
+            "method": "auto_pe_percentile",
+            "pe_25pct": round(pe_conservative, 1),
+            "pe_50pct": round(pe_neutral, 1),
+            "pe_75pct": round(pe_optimistic, 1),
+            "forward_eps": round(forward_eps, 3),
+            "ttm_eps": round(ttm_eps, 3),
+            "eps_source": "券商一致预期" if forecast_eps else "TTM外推",
+        },
+    }
+
+
 def _build_dividend_context(stock: StockData) -> str:
     """构建分红回报上下文供LLM阅读"""
     div = stock.info.get("dividend_history", [])
@@ -507,11 +622,12 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     # 提取LLM丰富字段（V2: 模型选择、情景分析、因子表等）
     raw = llm_result.get("raw_response") if isinstance(llm_result.get("raw_response"), dict) else {}
 
-    # YAML精确目标价覆写LLM（代码计算 > LLM猜测）
+    # === 代码精算目标价覆写LLM（代码计算 > LLM猜测）===
+    # 优先级：YAML精细模型 > 自动PE分位模型 > LLM生成（不信任）
     if segment_result and segment_result.get("source") == "yaml_model":
+        # 路径1: YAML精细模型（手工研究）
         yearly = segment_result.get("yearly_forecast", [])
         if len(yearly) >= 2:
-            # 最近年=保守, 中间年=中性, 最远年=乐观
             code_targets = {
                 "conservative": yearly[0]["target_price"],
                 "base": yearly[1]["target_price"],
@@ -528,6 +644,45 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
                 f"保守={code_targets['conservative']}, 中性={code_targets['base']}, "
                 f"乐观={code_targets['optimistic']}"
             )
+    else:
+        # 路径2: 自动PE分位模型（无YAML时兜底）
+        current_price = 0.0
+        if stock.daily_quotes:
+            last_quote = stock.daily_quotes[-1]
+            current_price = float(last_quote.get("close", 0) or 0)
+
+        forecast_eps = stock.info.get("profit_forecast", [])
+        auto_targets = _calc_auto_target_prices(
+            pe_ttm, pe_history, profit_yoy, current_price, forecast_eps,
+        )
+        if auto_targets:
+            meta = auto_targets.pop("_meta", {})
+            # 校验LLM目标价合理性：若LLM三情景全低于现价，用代码值覆写
+            llm_targets = raw.get("target_prices", {})
+            llm_all_below = (
+                llm_targets
+                and all(
+                    float(llm_targets.get(k, current_price)) < current_price * 0.8
+                    for k in ("conservative", "base", "optimistic")
+                    if llm_targets.get(k)
+                )
+            )
+            if llm_all_below or not llm_targets:
+                raw["target_prices"] = auto_targets
+                logger.warning(
+                    f"[valuation] 自动PE分位目标价覆写LLM"
+                    f"{'（LLM三情景均<现价80%）' if llm_all_below else '（LLM无目标价）'}: "
+                    f"保守={auto_targets['conservative']}, "
+                    f"中性={auto_targets['base']}, "
+                    f"乐观={auto_targets['optimistic']} "
+                    f"[PE区间={meta.get('pe_25pct')}/{meta.get('pe_50pct')}/{meta.get('pe_75pct')}, "
+                    f"EPS={meta.get('forward_eps')}({meta.get('eps_source')})]"
+                )
+            else:
+                logger.info(
+                    f"[valuation] LLM目标价通过合理性校验，保留LLM值。"
+                    f"代码参考值: {auto_targets['conservative']}/{auto_targets['base']}/{auto_targets['optimistic']}"
+                )
 
     # 合并LLM结果
     signal_score = max(-100, min(100, code_score + llm_result["score_adjustment"]))
@@ -581,6 +736,12 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
             "trap_detection": raw.get("trap_detection"),
             "target_prices": raw.get("target_prices", {}),
             "segment_forecast": segment_result if segment_result else None,
+            "precision_warnings": _merge_precision_warnings(
+                raw.get("precision_warnings", []),
+                segment_result,
+                data_warnings,
+                stock,
+            ),
         },
         execution_time_ms=elapsed_ms,
     )
