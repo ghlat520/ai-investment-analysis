@@ -623,9 +623,19 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     raw = llm_result.get("raw_response") if isinstance(llm_result.get("raw_response"), dict) else {}
 
     # === 代码精算目标价覆写LLM（代码计算 > LLM猜测）===
-    # 优先级：YAML精细模型 > 自动PE分位模型 > LLM生成（不信任）
+    # 核心原则：数值计算必须由代码完成，LLM只做定性判断
+    # 优先级：YAML精细模型 > 自动PE分位模型 > LLM生成（仅作参考，不信任）
+    #
+    # 设计依据（第一性原理）：
+    # 1. LLM没有精确数值计算能力，目标价必须是代码计算
+    # 2. LLM目标价误差可达2-3倍（如54元 vs 138元），不可作为决策依据
+    # 3. 历史覆写条件（LLM<现价80%才覆写）存在漏洞，允许LLM在现价附近随意猜测
+
+    code_targets = None  # 代码计算的目标价
+    target_price_source = "none"  # 来源标记
+
     if segment_result and segment_result.get("source") == "yaml_model":
-        # 路径1: YAML精细模型（手工研究）
+        # 路径1: YAML精细模型（最高优先级，用户自有研究）
         yearly = segment_result.get("yearly_forecast", [])
         if len(yearly) >= 2:
             code_targets = {
@@ -638,14 +648,15 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
                     + yearly[-1]["target_price"] * 0.3, 2
                 ),
             }
-            raw["target_prices"] = code_targets
+            target_price_source = "yaml_model"
             logger.info(
-                f"[valuation] YAML目标价覆写LLM: "
+                f"[valuation] 目标价来源=YAML精细模型: "
                 f"保守={code_targets['conservative']}, 中性={code_targets['base']}, "
                 f"乐观={code_targets['optimistic']}"
             )
-    else:
-        # 路径2: 自动PE分位模型（无YAML时兜底）
+
+    if not code_targets:
+        # 路径2: 自动PE分位模型（YAML不可用时的兜底）
         current_price = 0.0
         if stock.daily_quotes:
             last_quote = stock.daily_quotes[-1]
@@ -657,32 +668,39 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
         )
         if auto_targets:
             meta = auto_targets.pop("_meta", {})
-            # 校验LLM目标价合理性：若LLM三情景全低于现价，用代码值覆写
-            llm_targets = raw.get("target_prices", {})
-            llm_all_below = (
-                llm_targets
-                and all(
-                    float(llm_targets.get(k, current_price)) < current_price * 0.8
-                    for k in ("conservative", "base", "optimistic")
-                    if llm_targets.get(k)
-                )
+            code_targets = auto_targets
+            target_price_source = "auto_pe_percentile"
+            logger.info(
+                f"[valuation] 目标价来源=自动PE分位: "
+                f"保守={auto_targets['conservative']}, "
+                f"中性={auto_targets['base']}, "
+                f"乐观={auto_targets['optimistic']} "
+                f"[PE区间={meta.get('pe_25pct')}/{meta.get('pe_50pct')}/{meta.get('pe_75pct')}, "
+                f"EPS={meta.get('forward_eps')}({meta.get('eps_source')})]"
             )
-            if llm_all_below or not llm_targets:
-                raw["target_prices"] = auto_targets
-                logger.warning(
-                    f"[valuation] 自动PE分位目标价覆写LLM"
-                    f"{'（LLM三情景均<现价80%）' if llm_all_below else '（LLM无目标价）'}: "
-                    f"保守={auto_targets['conservative']}, "
-                    f"中性={auto_targets['base']}, "
-                    f"乐观={auto_targets['optimistic']} "
-                    f"[PE区间={meta.get('pe_25pct')}/{meta.get('pe_50pct')}/{meta.get('pe_75pct')}, "
-                    f"EPS={meta.get('forward_eps')}({meta.get('eps_source')})]"
-                )
-            else:
-                logger.info(
-                    f"[valuation] LLM目标价通过合理性校验，保留LLM值。"
-                    f"代码参考值: {auto_targets['conservative']}/{auto_targets['base']}/{auto_targets['optimistic']}"
-                )
+
+    # 强制覆写：代码计算的目标价始终优先于LLM猜测
+    if code_targets:
+        llm_targets = raw.get("target_prices", {})
+        if llm_targets:
+            # 保留LLM原始值到metadata供对比分析，但不作为最终输出
+            logger.warning(
+                f"[valuation] ⚠️ LLM目标价被代码覆写（LLM无精确计算能力）"
+                f"\n  LLM猜测: 保守={llm_targets.get('conservative')}, "
+                f"中性={llm_targets.get('base')}, 乐观={llm_targets.get('optimistic')}"
+                f"\n  代码计算: 保守={code_targets['conservative']}, "
+                f"中性={code_targets['base']}, 乐观={code_targets['optimistic']}"
+            )
+            # 存储LLM原始值供审计
+            raw["_llm_original_target_prices"] = llm_targets
+        raw["target_prices"] = code_targets
+        raw["_target_price_source"] = target_price_source
+    else:
+        # 代码也无法计算时，记录警告，保留LLM值但标记为低置信度
+        logger.warning(
+            "[valuation] ⚠️ 代码无法计算目标价（数据不足），使用LLM值但置信度降低"
+        )
+        raw["_target_price_source"] = "llm_fallback"
 
     # 合并LLM结果
     signal_score = max(-100, min(100, code_score + llm_result["score_adjustment"]))
