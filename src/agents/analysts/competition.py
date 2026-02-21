@@ -105,20 +105,27 @@ def _calc_competition_anchor(stock: StockData) -> tuple[int, str]:
     # 3. 市值排名（市场认可度）
     company_mv = info.get("market_cap")
     if company_mv and peers:
-        peer_mvs = []
-        for p in peers:
-            mv = p.get("market_cap") or p.get("total_mv")
-            if mv and not (isinstance(mv, float) and np.isnan(mv)):
-                try:
-                    peer_mvs.append(float(mv))
-                except (ValueError, TypeError):
-                    pass
+        # 确保 company_mv 是数值
+        try:
+            company_mv = float(company_mv)
+        except (ValueError, TypeError):
+            company_mv = None
 
-        if peer_mvs:
-            # 计算市值排名
-            larger = sum(1 for mv in peer_mvs if mv > company_mv)
-            rank = larger + 1  # 排名（1=最大）
-            total = len(peer_mvs) + 1
+        if company_mv:
+            peer_mvs = []
+            for p in peers:
+                mv = p.get("market_cap") or p.get("total_mv")
+                if mv and mv != "-" and not (isinstance(mv, float) and np.isnan(mv)):
+                    try:
+                        peer_mvs.append(float(mv))
+                    except (ValueError, TypeError):
+                        pass
+
+            if peer_mvs:
+                # 计算市值排名
+                larger = sum(1 for mv in peer_mvs if mv > company_mv)
+                rank = larger + 1  # 排名（1=最大）
+                total = len(peer_mvs) + 1
 
             if rank <= 3:
                 score += 10
@@ -143,7 +150,7 @@ def _calc_competition_anchor(stock: StockData) -> tuple[int, str]:
         peer_rev_yoys = []
         for p in peers:
             rev = p.get("revenue_yoy") or p.get("rev_yoy")
-            if rev and not (isinstance(rev, float) and np.isnan(rev)):
+            if rev and rev != "-" and not (isinstance(rev, float) and np.isnan(rev)):
                 try:
                     peer_rev_yoys.append(float(rev))
                 except (ValueError, TypeError):
@@ -241,9 +248,22 @@ def _build_competition_context(stock: StockData) -> str:
             pe_str = f"{float(pe):.1f}" if pe and not (isinstance(pe, float) and np.isnan(pe)) else "-"
             lines.append(f"{sym} | {nm} | {mv_str} | {roe_str} | {gm_str} | {rev_str} | {pe_str}")
 
-        # 行业统计
-        roe_vals = [float(p.get("roe", 0) or 0) for p in peers if p.get("roe") and not (isinstance(p.get("roe"), float) and np.isnan(p.get("roe")))]
-        gm_vals = [float(p.get("gross_margin", 0) or 0) for p in peers if p.get("gross_margin") and not (isinstance(p.get("gross_margin"), float) and np.isnan(p.get("gross_margin")))]
+        # 行业统计（安全转换）
+        roe_vals = []
+        gm_vals = []
+        for p in peers:
+            roe = p.get("roe")
+            if roe is not None and roe != "-" and not (isinstance(roe, float) and np.isnan(roe)):
+                try:
+                    roe_vals.append(float(roe))
+                except (ValueError, TypeError):
+                    pass
+            gm = p.get("gross_margin")
+            if gm is not None and gm != "-" and not (isinstance(gm, float) and np.isnan(gm)):
+                try:
+                    gm_vals.append(float(gm))
+                except (ValueError, TypeError):
+                    pass
 
         if roe_vals:
             lines.append(f"\n行业ROE: 均值{sum(roe_vals)/len(roe_vals):.1f}%, 中位数{sorted(roe_vals)[len(roe_vals)//2]:.1f}%")

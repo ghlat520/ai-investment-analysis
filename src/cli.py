@@ -621,7 +621,7 @@ def validate(days: int, stock: str | None, auto_verify: bool) -> None:
 
             direction_icon = "✓" if result["direction_correct"] else "✗"
             click.echo(
-                f"  [{r.symbol}] 预测{r.final_score:+d} → 实际{return['actual_return_pct']:+.2f}% "
+                f"  [{r.symbol}] 预测{r.final_score:+d} → 实际{result['actual_return_pct']:+.2f}% "
                 f"方向:{direction_icon} 目标价:{result['price_target_hit']}"
             )
             verified_count += 1
