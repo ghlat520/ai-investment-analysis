@@ -54,6 +54,12 @@ class FusionDecision:
     operation_strategy: dict[str, Any] = field(default_factory=dict)
     sub_scores: dict[str, Any] = field(default_factory=dict)
 
+    # P2: 显式不确定性表达
+    score_range_low: int = 0  # 95%置信区间下限
+    score_range_high: int = 0  # 95%置信区间上限
+    key_uncertainties: tuple[str, ...] = ()  # 关键不确定性因素
+    verification_points: tuple[dict[str, Any], ...] = ()  # 验证时点及指标
+
 
 @dataclass
 class StockData:

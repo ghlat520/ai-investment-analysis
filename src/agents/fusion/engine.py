@@ -287,6 +287,142 @@ def _llm_debate_fusion(
     return result
 
 
+def _calc_score_range(
+    signals: list[AgentSignal],
+    final_score: int,
+    confidence: float,
+    conflicts: list[str],
+) -> tuple[int, int]:
+    """计算95%置信区间
+
+    基于以下因素：
+    1. Agent评分方差（越大区间越宽）
+    2. 综合置信度（越低区间越宽）
+    3. 矛盾信号数量（越多区间越宽）
+    """
+    import statistics
+
+    if len(signals) < 2:
+        # 单Agent时，基于置信度给出默认区间
+        half_width = int(30 * (1 - confidence) + 10)
+        return final_score - half_width, final_score + half_width
+
+    # 计算Agent评分的标准差
+    scores = [s.signal_score for s in signals]
+    try:
+        std_dev = statistics.stdev(scores)
+    except statistics.StatisticsError:
+        std_dev = 20  # 默认标准差
+
+    # 基础区间宽度 = 1.96 * 标准差 / sqrt(n)（95%置信区间公式）
+    n = len(signals)
+    base_half_width = int(1.96 * std_dev / (n ** 0.5))
+
+    # 根据置信度调整
+    confidence_adjustment = (1 - confidence) * 20
+
+    # 根据矛盾数量调整
+    conflict_adjustment = len(conflicts) * 5
+
+    # 最终半宽
+    half_width = int(base_half_width + confidence_adjustment + conflict_adjustment)
+    half_width = max(10, min(40, half_width))  # 限制在10-40分
+
+    low = max(-100, final_score - half_width)
+    high = min(100, final_score + half_width)
+
+    return low, high
+
+
+def _extract_key_uncertainties(
+    signals: list[AgentSignal],
+    conflicts: list[str],
+    divergence_points: list[str],
+) -> list[str]:
+    """从Agent信号中提取关键不确定性因素"""
+    uncertainties = []
+
+    # 从矛盾信号中提取
+    for conflict in conflicts[:3]:
+        uncertainties.append(f"信号分歧: {conflict}")
+
+    # 从分歧点中提取
+    uncertainties.extend(divergence_points[:3])
+
+    # 从低置信度Agent的风险中提取
+    for s in signals:
+        if s.confidence < 0.6 and s.risks:
+            for risk in s.risks[:1]:
+                if risk not in uncertainties:
+                    uncertainties.append(f"[{s.agent_name}风险] {risk}")
+
+    # 去重并限制数量
+    seen = set()
+    unique = []
+    for u in uncertainties:
+        if u not in seen:
+            seen.add(u)
+            unique.append(u)
+            if len(unique) >= 5:
+                break
+
+    return unique
+
+
+def _generate_verification_points(
+    signals: list[AgentSignal],
+    stock: Optional[StockData],
+    divergence_points: list[str],
+) -> list[dict[str, Any]]:
+    """生成验证时点及监控指标"""
+    from datetime import datetime
+
+    points = []
+
+    # 基于分歧点生成验证指标
+    for div in divergence_points[:3]:
+        points.append({
+            "type": "分歧验证",
+            "description": div,
+            "timing": "下季度财报",
+            "indicator": "关注相关业务线数据变化",
+        })
+
+    # 基于Agent风险生成验证点
+    for s in signals:
+        if s.risks and s.confidence < 0.7:
+            for risk in s.risks[:1]:
+                points.append({
+                    "type": "风险监控",
+                    "agent": s.agent_name,
+                    "description": risk,
+                    "timing": "持续监控",
+                    "indicator": f"关注{s.agent_name}相关指标变化",
+                })
+
+    # 去重
+    seen = set()
+    unique = []
+    for p in points:
+        key = p.get("description", "")
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+            if len(unique) >= 4:
+                break
+
+    # 如果没有提取到，添加默认验证点
+    if not unique:
+        unique.append({
+            "type": "综合验证",
+            "description": "整体分析结论验证",
+            "timing": "30天后",
+            "indicator": "股价走势 vs 预期方向",
+        })
+
+    return unique
+
+
 def fuse_signals(
     signals: list[AgentSignal],
     stock: Optional[StockData] = None,
@@ -299,6 +435,7 @@ def fuse_signals(
     3. 信号分组：多方/空方/中性
     4. LLM层：bull vs bear辩论式融合（可选）
     5. 最终得分：LLM可用时以LLM为主(0.7) + code为辅(0.3)
+    6. P2: 计算置信区间和关键不确定性
     """
     start = time.time()
 
@@ -308,6 +445,8 @@ def fuse_signals(
             final_action="观望",
             confidence=0.0,
             reasoning="无分析信号输入",
+            score_range_low=-20,
+            score_range_high=20,
         )
 
     # Step 1: 权重归一化到活跃Agent
@@ -340,6 +479,10 @@ def fuse_signals(
         if stock.info.get("is_delisting"):
             code_score = -100
             logger.warning(f"[Fusion] 退市风险 {stock.symbol}，强制-100")
+        # P2: 管理层风险否决
+        if stock.info.get("management_red_flag"):
+            code_score = min(code_score, -30)
+            logger.warning(f"[Fusion] 管理层风险 {stock.symbol}，强制降分至{code_score}")
 
     # Step 4: 信号分组 + 矛盾检测
     bullish, bearish, neutral_signals = _group_signals(signals)
@@ -411,12 +554,36 @@ def fuse_signals(
     operation_strategy = llm_result.get("operation_strategy", {})
     sub_scores = llm_result.get("sub_scores", {})
 
+    # P2: 计算置信区间
+    score_range_low, score_range_high = _calc_score_range(
+        signals, final_score, confidence, conflicts
+    )
+
+    # P2: 提取关键不确定性
+    key_uncertainties = _extract_key_uncertainties(
+        signals, conflicts, list(divergence_points)
+    )
+
+    # P2: 生成验证时点
+    verification_points = _generate_verification_points(
+        signals, stock, list(divergence_points)
+    )
+
+    # 从LLM结果中提取不确定性信息（如果有）
+    if llm_result.get("enhanced"):
+        raw = llm_result.get("raw_response") if isinstance(llm_result.get("raw_response"), dict) else {}
+        if raw:
+            if raw.get("key_uncertainties"):
+                key_uncertainties = list(raw["key_uncertainties"])[:5]
+            if raw.get("verification_points"):
+                verification_points = list(raw["verification_points"])[:4]
+
     elapsed_ms = int((time.time() - start) * 1000)
     logger.info(
-        f"[Fusion] 完成: score={final_score:+d} action={final_action} "
-        f"confidence={confidence:.0%} position={position_pct}% "
+        f"[Fusion] 完成: score={final_score:+d}[{score_range_low:+d}~{score_range_high:+d}] "
+        f"action={final_action} confidence={confidence:.0%} position={position_pct}% "
         f"bull={len(bullish)} bear={len(bearish)} neutral={len(neutral_signals)} "
-        f"llm={'Y' if llm_result['enhanced'] else 'N'} {elapsed_ms}ms"
+        f"uncertainties={len(key_uncertainties)} llm={'Y' if llm_result['enhanced'] else 'N'} {elapsed_ms}ms"
     )
 
     return FusionDecision(
@@ -439,4 +606,9 @@ def fuse_signals(
         risk_cross_validation=tuple(risk_cross_validation) if isinstance(risk_cross_validation, list) else (),
         operation_strategy=operation_strategy if isinstance(operation_strategy, dict) else {},
         sub_scores=sub_scores if isinstance(sub_scores, dict) else {},
+        # P2: 不确定性字段
+        score_range_low=score_range_low,
+        score_range_high=score_range_high,
+        key_uncertainties=tuple(key_uncertainties),
+        verification_points=tuple(verification_points),
     )

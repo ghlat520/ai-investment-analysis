@@ -248,6 +248,32 @@ def generate_report(state: dict[str, Any]) -> str:
         "",
     ]
 
+    # P2: 不确定性表达
+    if hasattr(fusion, 'score_range_low') and hasattr(fusion, 'score_range_high'):
+        lines.append("### 评分置信区间")
+        lines.append("")
+        lines.append(f"**95%置信区间**: {fusion.score_range_low:+d} ~ {fusion.score_range_high:+d}")
+        lines.append("")
+        if fusion.key_uncertainties:
+            lines.append("**关键不确定性**:")
+            lines.append("")
+            for u in fusion.key_uncertainties[:5]:
+                lines.append(f"- {u}")
+            lines.append("")
+        if fusion.verification_points:
+            lines.append("**验证时点**:")
+            lines.append("")
+            lines.append("| 类型 | 验证内容 | 时间 | 监控指标 |")
+            lines.append("|------|---------|------|---------|")
+            for vp in fusion.verification_points[:4]:
+                if isinstance(vp, dict):
+                    vp_type = vp.get("type", "")
+                    desc = vp.get("description", "")
+                    timing = vp.get("timing", "")
+                    indicator = vp.get("indicator", "")
+                    lines.append(f"| {vp_type} | {desc} | {timing} | {indicator} |")
+            lines.append("")
+
     # 目标价（优先用估值Agent的计算结果，有推导过程可追溯）
     valuation_tp = {}
     valuation_signal = next((s for s in signals if s.agent_name == "valuation"), None)
