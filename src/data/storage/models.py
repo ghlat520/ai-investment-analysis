@@ -268,3 +268,92 @@ class PredictionRecord(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+# ========== P3: 多时间维度分析模型 ==========
+
+
+class TrackedStock(Base):
+    """追踪股票表 - 记录需要定期重分析的股票"""
+    __tablename__ = "tracked_stocks"
+    __table_args__ = (UniqueConstraint("symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+
+    # 追踪配置
+    track_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    reanalysis_frequency: Mapped[str] = mapped_column(String(20), default="weekly")  # daily/weekly/monthly
+    priority: Mapped[int] = mapped_column(Integer, default=5)  # 1-10, 10最高
+
+    # 上次分析结果快照
+    last_score: Mapped[Optional[int]] = mapped_column(Integer)
+    last_action: Mapped[Optional[str]] = mapped_column(String(20))
+    last_analysis_date: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # 趋势信息
+    score_trend: Mapped[Optional[str]] = mapped_column(String(20))  # rising/falling/stable
+    score_change_7d: Mapped[Optional[int]] = mapped_column(Integer)  # 7天变化
+    score_change_30d: Mapped[Optional[int]] = mapped_column(Integer)  # 30天变化
+
+    # 备注
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class CatalystEvent(Base):
+    """催化剂事件表 - 记录可能影响股价的未来事件"""
+    __tablename__ = "catalyst_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # 事件信息
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)  # earnings/product/regulation/partnership/etc
+    event_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    event_date: Mapped[Optional[date]] = mapped_column(Date)  # 预计日期
+    event_date_precision: Mapped[str] = mapped_column(String(20), default="day")  # day/week/month/quarter
+
+    # 事件影响评估
+    expected_impact: Mapped[str] = mapped_column(String(20), default="neutral")  # bullish/bearish/neutral
+    impact_confidence: Mapped[float] = mapped_column(Numeric(4, 3), default=0.5)  # 0-1
+    impact_magnitude: Mapped[str] = mapped_column(String(20), default="moderate")  # minor/moderate/major
+
+    # 状态
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending/occurred/cancelled/impacted
+    actual_impact: Mapped[Optional[str]] = mapped_column(Text)  # 实际影响描述
+
+    # 来源和备注
+    source: Mapped[Optional[str]] = mapped_column(String(200))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class ScoreHistory(Base):
+    """评分历史表 - 记录每日评分快照用于趋势分析"""
+    __tablename__ = "score_history"
+    __table_args__ = (UniqueConstraint("symbol", "score_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False)
+    score_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    # 综合评分
+    final_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    final_action: Mapped[str] = mapped_column(String(20), nullable=False)
+    confidence: Mapped[float] = mapped_column(Numeric(4, 3), nullable=False)
+
+    # Agent评分快照
+    agent_scores: Mapped[Optional[dict]] = mapped_column(JSON)  # {agent_name: score}
+
+    # 价格快照
+    close_price: Mapped[Optional[float]] = mapped_column(Numeric(12, 4))
+
+    # 关联的run_id
+    run_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

@@ -716,5 +716,258 @@ def error_analysis(record_id: int) -> None:
             click.echo(f"  - {fix}")
 
 
+# ========== P3: 多时间维度分析命令 ==========
+
+
+@main.group("track")
+def track_group() -> None:
+    """追踪股票管理（定期重分析）"""
+    pass
+
+
+@track_group.command("add")
+@click.argument("symbol")
+@click.option("--frequency", "-f", default="weekly", type=click.Choice(["daily", "weekly", "monthly"]),
+              help="重分析频率")
+@click.option("--priority", "-p", default=5, type=int, help="优先级 (1-10)")
+@click.option("--notes", "-n", default="", help="备注")
+def track_add(symbol: str, frequency: str, priority: int, notes: str) -> None:
+    """添加股票到追踪列表"""
+    from src.services.trend_service import TrendService
+
+    svc = TrendService()
+    result = svc.add_tracked_stock(symbol, frequency, priority, notes)
+
+    click.echo(f"✓ 已添加 {symbol} 到追踪列表")
+    click.echo(f"  频率: {frequency}")
+    click.echo(f"  优先级: {priority}")
+
+
+@track_group.command("remove")
+@click.argument("symbol")
+def track_remove(symbol: str) -> None:
+    """从追踪列表移除股票"""
+    from src.services.trend_service import TrendService
+
+    svc = TrendService()
+    if svc.remove_tracked_stock(symbol):
+        click.echo(f"✓ 已停止追踪 {symbol}")
+    else:
+        click.echo(f"✗ {symbol} 不在追踪列表中")
+
+
+@track_group.command("list")
+@click.option("--all", "-a", "show_all", is_flag=True, help="显示已停用的")
+@click.option("--frequency", "-f", type=click.Choice(["daily", "weekly", "monthly"]), help="按频率筛选")
+def track_list(show_all: bool, frequency: Optional[str]) -> None:
+    """列出追踪中的股票"""
+    from src.services.trend_service import TrendService
+
+    svc = TrendService()
+    stocks = svc.get_tracked_stocks(enabled_only=not show_all, frequency=frequency)
+
+    if not stocks:
+        click.echo("追踪列表为空")
+        return
+
+    click.echo(f"\n{'代码':<10} {'名称':<10} {'频率':<8} {'优先':>4} {'评分':>6} {'趋势':<8} {'7日':>5}")
+    click.echo("-" * 70)
+
+    for s in stocks:
+        trend = s.get("score_trend") or "-"
+        change_7d = s.get("score_change_7d")
+        change_str = f"{change_7d:+d}" if change_7d is not None else "-"
+        score = f"{s['last_score']:+d}" if s['last_score'] is not None else "-"
+
+        click.echo(
+            f"{s['symbol']:<10} {s['name']:<10} {s['reanalysis_frequency']:<8} "
+            f"{s['priority']:>4} {score:>6} {trend:<8} {change_str:>5}"
+        )
+
+
+@track_group.command("reanalyze")
+@click.option("--frequency", "-f", type=click.Choice(["daily", "weekly", "monthly"]), help="指定频率")
+@click.option("--symbols", "-s", help="指定股票（逗号分隔）")
+@click.option("--max", "-m", "max_stocks", default=20, help="最大分析数量")
+def track_reanalyze(frequency: Optional[str], symbols: Optional[str], max_stocks: int) -> None:
+    """执行定期重分析"""
+    from src.services.reanalysis_service import ReanalysisService
+
+    svc = ReanalysisService()
+    symbol_list = symbols.split(",") if symbols else None
+
+    click.echo(f"开始重分析...")
+    result = svc.run_reanalysis(symbols=symbol_list, frequency=frequency, max_stocks=max_stocks)
+
+    click.echo(f"\n完成: {result['success']}/{result['total']} 成功")
+
+    if result["results"]:
+        click.echo(f"\n{'代码':<10} {'评分':>6} {'操作':<10} {'状态':<8}")
+        click.echo("-" * 40)
+        for r in result["results"]:
+            if r.get("success"):
+                click.echo(f"{r['symbol']:<10} {r['final_score']:>+6d} {r['final_action']:<10} ✓")
+            else:
+                click.echo(f"{r['symbol']:<10} {'-':>6} {'-':<10} ✗ {r.get('error', '')}")
+
+
+@main.command("trend")
+@click.argument("symbol")
+@click.option("--days", "-d", default=30, help="显示天数")
+def show_trend(symbol: str, days: int) -> None:
+    """查看股票评分趋势"""
+    from src.services.trend_service import TrendService
+
+    svc = TrendService()
+    summary = svc.get_trend_summary(symbol)
+
+    click.echo(f"\n=== {summary.get('name', symbol)}({symbol}) 趋势分析 ===")
+
+    if summary.get("tracked"):
+        click.echo(f"追踪状态: {'启用' if summary['track_enabled'] else '停用'}")
+        click.echo(f"分析频率: {summary['reanalysis_frequency']}")
+        click.echo(f"当前评分: {summary['last_score']:+d}" if summary['last_score'] else "当前评分: -")
+        click.echo(f"评分趋势: {summary.get('score_trend', '-')}")
+        click.echo(f"7日变化: {summary['score_change_7d']:+d}" if summary.get('score_change_7d') else "7日变化: -")
+        click.echo(f"30日变化: {summary['score_change_30d']:+d}" if summary.get('score_change_30d') else "30日变化: -")
+
+    history = summary.get("history", [])
+    if history:
+        click.echo(f"\n=== 最近{len(history)}天评分变化 ===")
+        click.echo(f"{'日期':<12} {'评分':>6} {'操作':<10} {'置信度':>6}")
+        click.echo("-" * 40)
+
+        for h in history[-14:]:  # 最多显示14天
+            click.echo(
+                f"{h['date']:<12} {h['final_score']:>+6d} {h['final_action']:<10} {h['confidence']:>5.0%}"
+            )
+
+
+@main.group("catalyst")
+def catalyst_group() -> None:
+    """催化剂日历管理"""
+    pass
+
+
+@catalyst_group.command("add")
+@click.argument("symbol")
+@click.option("--type", "-t", "event_type", required=True, help="事件类型 (earnings/product/regulation/partnership)")
+@click.option("--name", "-n", "event_name", required=True, help="事件名称")
+@click.option("--date", "-d", "event_date", help="事件日期 (YYYY-MM-DD)")
+@click.option("--impact", "-i", default="neutral", type=click.Choice(["bullish", "bearish", "neutral"]),
+              help="预期影响")
+@click.option("--magnitude", "-m", default="moderate", type=click.Choice(["minor", "moderate", "major"]),
+              help="影响程度")
+@click.option("--notes", help="备注")
+def catalyst_add(symbol: str, event_type: str, event_name: str, event_date: Optional[str],
+                 impact: str, magnitude: str, notes: Optional[str]) -> None:
+    """添加催化剂事件"""
+    from src.services.trend_service import TrendService
+    from datetime import datetime as dt
+
+    svc = TrendService()
+
+    parsed_date = None
+    if event_date:
+        try:
+            parsed_date = dt.strptime(event_date, "%Y-%m-%d").date()
+        except ValueError:
+            click.echo("日期格式错误，请使用 YYYY-MM-DD")
+            return
+
+    result = svc.add_catalyst_event(
+        symbol=symbol,
+        event_type=event_type,
+        event_name=event_name,
+        event_date=parsed_date,
+        expected_impact=impact,
+        impact_magnitude=magnitude,
+        notes=notes,
+    )
+
+    click.echo(f"✓ 已添加催化剂事件 (ID: {result.id})")
+    click.echo(f"  股票: {symbol}")
+    click.echo(f"  事件: {event_name}")
+    click.echo(f"  日期: {event_date or '未指定'}")
+
+
+@catalyst_group.command("list")
+@click.option("--symbol", "-s", help="筛选股票")
+@click.option("--days", "-d", default=30, help="未来天数")
+def catalyst_list(symbol: Optional[str], days: int) -> None:
+    """列出催化剂事件"""
+    from src.services.trend_service import TrendService
+
+    svc = TrendService()
+    events = svc.get_upcoming_catalysts(symbol=symbol, days=days)
+
+    if not events:
+        click.echo("没有找到催化剂事件")
+        return
+
+    click.echo(f"\n=== 催化剂日历 (未来{days}天) ===")
+    click.echo(f"{'ID':>4} {'代码':<10} {'事件':<30} {'日期':<12} {'影响':<8} {'天数':>5}")
+    click.echo("-" * 80)
+
+    for e in events:
+        date_str = e["event_date"] or "未定"
+        days_str = str(e["days_until"]) if e["days_until"] is not None else "-"
+        click.echo(
+            f"{e['id']:>4} {e['symbol']:<10} {e['event_name'][:28]:<30} "
+            f"{date_str:<12} {e['expected_impact']:<8} {days_str:>5}"
+        )
+
+
+@catalyst_group.command("complete")
+@click.argument("event_id", type=int)
+@click.option("--impact", help="实际影响描述")
+def catalyst_complete(event_id: int, impact: Optional[str]) -> None:
+    """标记催化剂事件为已完成"""
+    from src.services.trend_service import TrendService
+
+    svc = TrendService()
+    result = svc.update_catalyst_status(event_id, "occurred", impact)
+
+    if result:
+        click.echo(f"✓ 已标记事件 {event_id} 为已完成")
+    else:
+        click.echo(f"✗ 事件 {event_id} 不存在")
+
+
+@catalyst_group.command("calendar")
+@click.option("--weeks", "-w", default=4, help="显示周数")
+def catalyst_calendar(weeks: int) -> None:
+    """显示催化剂日历"""
+    from src.services.trend_service import TrendService
+    from datetime import date, timedelta
+
+    svc = TrendService()
+    start = date.today()
+    end = start + timedelta(weeks=weeks)
+
+    calendar = svc.get_catalyst_calendar(start, end)
+
+    if not calendar:
+        click.echo(f"未来{weeks}周内没有催化剂事件")
+        return
+
+    click.echo(f"\n=== 催化剂日历 ({start} ~ {end}) ===\n")
+
+    current_date = start
+    while current_date <= end:
+        date_str = current_date.isoformat()
+        weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][current_date.weekday()]
+
+        if date_str in calendar:
+            events = calendar[date_str]
+            click.echo(f"📅 {date_str} ({weekday})")
+            for e in events:
+                impact_icon = "🟢" if e["expected_impact"] == "bullish" else "🔴" if e["expected_impact"] == "bearish" else "⚪"
+                click.echo(f"   {impact_icon} {e['symbol']} - {e['event_name']}")
+            click.echo("")
+
+        current_date += timedelta(days=1)
+
+
 if __name__ == "__main__":
     main()
