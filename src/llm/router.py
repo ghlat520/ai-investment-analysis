@@ -39,6 +39,10 @@ PRICING: dict[str, dict[str, float]] = {
     "gpt-4o": {"input": 0.0025, "output": 0.01},
     "claude-sonnet-4-20250514": {"input": 0.003, "output": 0.015},
     "claude-haiku-4-20250414": {"input": 0.0008, "output": 0.004},
+    # 智谱 GLM（参考 https://open.bigmodel.cn/pricing）
+    "glm-5": {"input": 0.001, "output": 0.001},  # 约 1元/百万tokens
+    "glm-4-plus": {"input": 0.05, "output": 0.05},
+    "glm-4-flash": {"input": 0.0001, "output": 0.0001},
     # Ollama 本地模型（免费）
     "qwen2.5:14b": {"input": 0.0, "output": 0.0},
     "qwen2.5:7b": {"input": 0.0, "output": 0.0},

@@ -25,7 +25,7 @@ class DatabaseSettings(BaseSettings):
 class LLMSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", **_ENV_FILE_CONF)
 
-    # OpenAI
+    # OpenAI（兼容智谱GLM等OpenAI格式API，通过.env配置base_url）
     openai_api_key: Optional[str] = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_default_model: str = "gpt-4o-mini"
