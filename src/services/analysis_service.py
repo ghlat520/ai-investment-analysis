@@ -69,8 +69,18 @@ def _load_segment_model(symbol: str) -> dict | None:
         with open(config_path, encoding="utf-8") as f:
             data = yaml.safe_load(f)
         profiles = data.get("profiles", {})
-        # 支持 300054.SZ 和 300054 两种格式匹配
-        model = profiles.get(symbol) or profiles.get(symbol.split(".")[0])
+        # 支持多种格式匹配：300054.SZ / 300054 / 300054.SHE
+        model = (
+            profiles.get(symbol)  # 精确匹配
+            or profiles.get(symbol.split(".")[0])  # 去后缀匹配
+        )
+        # 新增：前缀匹配（传入300054，匹配300054.SZ或300054.SHE）
+        if not model:
+            base = symbol.split(".")[0]
+            for key in profiles:
+                if key.startswith(base + ".") or key == base:
+                    model = profiles[key]
+                    break
         return model
     except Exception as e:
         logger.debug(f"[segment_model] YAML加载失败: {e}")
