@@ -226,10 +226,19 @@ def _build_competition_context(stock: StockData) -> str:
         lines.append("代码 | 名称 | 市值亿 | ROE% | 毛利率% | 营收增速% | PE")
         lines.append("---|---|---|---|---|---|---")
 
+        # 安全转换函数
+        def safe_float(val, default=0):
+            if val is None or val == "-":
+                return default
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return default
+
         # 按市值排序
         sorted_peers = sorted(
             peers,
-            key=lambda p: float(p.get("market_cap") or p.get("total_mv") or 0),
+            key=lambda p: safe_float(p.get("market_cap") or p.get("total_mv")),
             reverse=True
         )
 
@@ -237,15 +246,20 @@ def _build_competition_context(stock: StockData) -> str:
             sym = p.get("symbol", "")
             nm = p.get("name", "")
             mv = p.get("market_cap") or p.get("total_mv")
-            mv_str = f"{float(mv)/1e8:.0f}" if mv else "-"
-            roe = p.get("roe", "-")
-            roe_str = f"{float(roe):.1f}" if roe and not (isinstance(roe, float) and np.isnan(roe)) else "-"
-            gm = p.get("gross_margin", "-")
-            gm_str = f"{float(gm):.1f}" if gm and not (isinstance(gm, float) and np.isnan(gm)) else "-"
-            rev = p.get("revenue_yoy") or p.get("rev_yoy", "-")
-            rev_str = f"{float(rev):.1f}" if rev and not (isinstance(rev, float) and np.isnan(rev)) else "-"
-            pe = p.get("pe", "-")
-            pe_str = f"{float(pe):.1f}" if pe and not (isinstance(pe, float) and np.isnan(pe)) else "-"
+            mv_val = safe_float(mv)
+            mv_str = f"{mv_val/1e8:.0f}" if mv_val else "-"
+            roe = p.get("roe")
+            roe_val = safe_float(roe, None)
+            roe_str = f"{roe_val:.1f}" if roe_val is not None else "-"
+            gm = p.get("gross_margin")
+            gm_val = safe_float(gm, None)
+            gm_str = f"{gm_val:.1f}" if gm_val is not None else "-"
+            rev = p.get("revenue_yoy") or p.get("rev_yoy")
+            rev_val = safe_float(rev, None)
+            rev_str = f"{rev_val:.1f}" if rev_val is not None else "-"
+            pe = p.get("pe")
+            pe_val = safe_float(pe, None)
+            pe_str = f"{pe_val:.1f}" if pe_val is not None else "-"
             lines.append(f"{sym} | {nm} | {mv_str} | {roe_str} | {gm_str} | {rev_str} | {pe_str}")
 
         # 行业统计（安全转换）
