@@ -1,40 +1,43 @@
 # 信号权重配置
 # 根据市场环境动态选择权重方案
-# 9个Agent权重
+# 10个Agent权重（P1新增competition）
 
 market_regimes:
   bull:  # 牛市：趋势和资金更重要
-    technical: 0.16
-    fundamental: 0.07
-    valuation: 0.07
-    money_flow: 0.16
-    sentiment: 0.12
-    moat: 0.08
-    business_model: 0.08
-    industry: 0.14
-    supply_chain: 0.12
+    technical: 0.14
+    fundamental: 0.06
+    valuation: 0.06
+    money_flow: 0.14
+    sentiment: 0.10
+    moat: 0.07
+    business_model: 0.07
+    industry: 0.12
+    supply_chain: 0.10
+    competition: 0.14  # 新增：牛市重视竞争格局
 
   bear:  # 熊市：价值和护城河更重要
-    technical: 0.08
-    fundamental: 0.14
-    valuation: 0.16
-    money_flow: 0.07
+    technical: 0.07
+    fundamental: 0.12
+    valuation: 0.14
+    money_flow: 0.06
     sentiment: 0.04
-    moat: 0.16
-    business_model: 0.14
-    industry: 0.11
-    supply_chain: 0.10
+    moat: 0.14
+    business_model: 0.12
+    industry: 0.10
+    supply_chain: 0.09
+    competition: 0.12  # 新增：熊市重视竞争护城河
 
   neutral:  # 震荡：均衡配置
-    technical: 0.10
-    fundamental: 0.14
-    valuation: 0.14
-    money_flow: 0.08
-    sentiment: 0.07
-    moat: 0.13
-    business_model: 0.12
-    industry: 0.11
-    supply_chain: 0.11
+    technical: 0.09
+    fundamental: 0.12
+    valuation: 0.12
+    money_flow: 0.07
+    sentiment: 0.06
+    moat: 0.11
+    business_model: 0.10
+    industry: 0.10
+    supply_chain: 0.10
+    competition: 0.13  # 新增：竞争格局是重要参考
 
 # 默认权重
 default: neutral
