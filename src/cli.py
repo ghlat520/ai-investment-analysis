@@ -19,7 +19,11 @@ import time
 from datetime import date, timedelta
 
 import click
+from dotenv import load_dotenv
 from loguru import logger
+
+# 启动时加载环境变量
+load_dotenv()
 
 
 def _setup_logging(level: str = "INFO") -> None:

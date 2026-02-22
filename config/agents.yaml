@@ -1,18 +1,14 @@
 # Agent 配置
-# 每个Agent可独立配置：模型、开关、参数
+# llm_provider/llm_model 省略时使用 .env 中的全局默认值
+# 切换模型只需改 .env: LLM_DEFAULT_PROVIDER + {PROVIDER}_DEFAULT_MODEL
+#
 # llm_mode: "enhance" (代码优先+LLM微调) 或 "primary" (LLM做主角)
 # llm_score_range: LLM评分调整范围（enhance模式下的±N）
-#
-# llm_provider 支持: ollama / openai / anthropic
-# ollama 使用本地模型（免费），适合开发/测试
-# openai/anthropic 使用云端 API（付费），适合生产环境
 
 agents:
   technical:
     enabled: true
     display_name: "技术面分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.2
     max_tokens: 2000
     timeout: 120
@@ -23,8 +19,6 @@ agents:
   fundamental:
     enabled: true
     display_name: "基本面分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -35,8 +29,6 @@ agents:
   valuation:
     enabled: true
     display_name: "估值分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -47,8 +39,6 @@ agents:
   money_flow:
     enabled: true
     display_name: "资金面分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.2
     max_tokens: 2000
     timeout: 120
@@ -59,8 +49,6 @@ agents:
   sentiment:
     enabled: true
     display_name: "情绪面分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 3000
     timeout: 180
@@ -71,8 +59,6 @@ agents:
   moat:
     enabled: true
     display_name: "护城河分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -82,8 +68,6 @@ agents:
   business_model:
     enabled: true
     display_name: "商业模式分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -93,8 +77,6 @@ agents:
   industry:
     enabled: true
     display_name: "行业分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -104,8 +86,6 @@ agents:
   supply_chain:
     enabled: true
     display_name: "产业链分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -115,8 +95,6 @@ agents:
   competition:
     enabled: true
     display_name: "竞争格局分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -126,8 +104,6 @@ agents:
   management:
     enabled: true
     display_name: "管理层质量分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -137,8 +113,6 @@ agents:
   esg:
     enabled: true
     display_name: "ESG分析"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.3
     max_tokens: 4000
     timeout: 180
@@ -148,8 +122,6 @@ agents:
   fusion:
     enabled: true
     display_name: "决策融合"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.2
     max_tokens: 6000
     timeout: 300
@@ -158,8 +130,6 @@ agents:
   report:
     enabled: true
     display_name: "研报生成"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.4
     max_tokens: 8000
     timeout: 300
@@ -168,8 +138,6 @@ agents:
   research_extractor:
     enabled: true
     display_name: "研报PDF摘要提取"
-    llm_provider: ollama
-    llm_model: qwen2.5:14b
     temperature: 0.2
     max_tokens: 4000
     timeout: 180

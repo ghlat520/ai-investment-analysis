@@ -16,7 +16,11 @@ import os
 from pathlib import Path
 from typing import Any, Optional
 
+from dotenv import load_dotenv
 from loguru import logger
+
+# 模块自负责：确保环境变量已加载
+load_dotenv()
 
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -186,10 +190,20 @@ def llm_enhance(
         "llm_latency_ms": 0,
     }
 
-    # 加载Agent配置
+    # 加载Agent配置（支持全局默认值 fallback）
+    from config.settings import get_settings
+    settings = get_settings()
+
     cfg = _load_agent_config(agent_name)
-    provider = cfg.get("llm_provider", "openai")
-    model = cfg.get("llm_model", "gpt-4o-mini")
+
+    # Provider: Agent配置 > 全局默认
+    provider = cfg.get("llm_provider") or settings.llm.llm_default_provider
+
+    # Model: Agent配置 > Provider默认模型
+    model = cfg.get("llm_model")
+    if not model or model == "default":
+        model = settings.llm.get_default_model(provider)
+
     temperature = cfg.get("temperature", 0.3)
     max_tokens = cfg.get("max_tokens", 2000)
     timeout = cfg.get("timeout", 30)
@@ -332,10 +346,20 @@ def llm_deep_analyze(
         "llm_latency_ms": 0,
     }
 
-    # 加载Agent配置
+    # 加载Agent配置（支持全局默认值 fallback）
+    from config.settings import get_settings
+    settings = get_settings()
+
     cfg = _load_agent_config(agent_name)
-    provider = cfg.get("llm_provider", "anthropic")
-    model = cfg.get("llm_model", "claude-sonnet-4-20250514")
+
+    # Provider: Agent配置 > 全局默认
+    provider = cfg.get("llm_provider") or settings.llm.llm_default_provider
+
+    # Model: Agent配置 > Provider默认模型
+    model = cfg.get("llm_model")
+    if not model or model == "default":
+        model = settings.llm.get_default_model(provider)
+
     temperature = cfg.get("temperature", 0.3)
     max_tokens = cfg.get("max_tokens", 3000)
     timeout = cfg.get("timeout", 45)

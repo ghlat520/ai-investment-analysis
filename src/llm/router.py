@@ -108,12 +108,19 @@ class LLMRouter:
                 )
             elif provider == "anthropic":
                 from langchain_anthropic import ChatAnthropic
-                self._models[key] = ChatAnthropic(
-                    model=model_name,
-                    temperature=kwargs.get("temperature", 0.3),
-                    max_tokens=kwargs.get("max_tokens", 2000),
-                    timeout=kwargs.get("timeout", 60),
-                )
+
+                from config.settings import get_settings
+                settings = get_settings()
+                anthropic_kwargs = {
+                    "model": model_name,
+                    "temperature": kwargs.get("temperature", 0.3),
+                    "max_tokens": kwargs.get("max_tokens", 2000),
+                    "timeout": kwargs.get("timeout", 60),
+                }
+                # 支持自定义 base_url（如智谱代理）
+                if settings.llm.anthropic_base_url:
+                    anthropic_kwargs["anthropic_api_url"] = settings.llm.anthropic_base_url
+                self._models[key] = ChatAnthropic(**anthropic_kwargs)
             else:
                 raise ValueError(f"不支持的provider: {provider}")
         return self._models[key]

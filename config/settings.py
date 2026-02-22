@@ -25,13 +25,17 @@ class DatabaseSettings(BaseSettings):
 class LLMSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", **_ENV_FILE_CONF)
 
+    # 全局默认 Provider（ollama/openai/anthropic）
+    llm_default_provider: str = "ollama"
+
     # OpenAI（兼容智谱GLM等OpenAI格式API，通过.env配置base_url）
     openai_api_key: Optional[str] = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_default_model: str = "gpt-4o-mini"
 
-    # Anthropic
+    # Anthropic（支持智谱代理等自定义端点）
     anthropic_api_key: Optional[str] = None
+    anthropic_base_url: Optional[str] = None  # 自定义API端点，如智谱代理
     anthropic_default_model: str = "claude-sonnet-4-20250514"
 
     # Ollama（本地部署）
@@ -45,6 +49,15 @@ class LLMSettings(BaseSettings):
     llm_max_retries: int = 3
     llm_request_timeout: int = 60
     llm_cache_ttl: int = 3600  # 秒
+
+    def get_default_model(self, provider: str) -> str:
+        """获取指定 provider 的默认模型"""
+        mapping = {
+            "openai": self.openai_default_model,
+            "anthropic": self.anthropic_default_model,
+            "ollama": self.ollama_default_model,
+        }
+        return mapping.get(provider, "gpt-4o-mini")
 
 
 class DataSourceSettings(BaseSettings):
