@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { TaskInfo, SSEAgentCompletedEvent, AgentSignal, FusionDecision, TaskResult } from '../types';
+import type { TaskInfo, SSEAgentCompletedEvent, TaskResult } from '../types';
 import { ALL_AGENTS } from '../types';
 
 export type AgentStatus = 'pending' | 'running' | 'completed' | 'error';

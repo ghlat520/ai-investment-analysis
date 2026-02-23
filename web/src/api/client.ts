@@ -1,9 +1,33 @@
 import axios from 'axios';
 
+// API Key 管理：从 URL 参数读取并缓存
+const API_KEY_KEY = 'ai_invest_api_key';
+
+function getApiKey(): string | null {
+  // 1. 先从 URL 参数读取（优先级最高）
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlKey = urlParams.get('key');
+  if (urlKey) {
+    localStorage.setItem(API_KEY_KEY, urlKey);
+    return urlKey;
+  }
+  // 2. 从 localStorage 读取
+  return localStorage.getItem(API_KEY_KEY);
+}
+
 const apiClient = axios.create({
   baseURL: '/api/v1',
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
+});
+
+// 请求拦截器：自动添加 key 参数
+apiClient.interceptors.request.use((config) => {
+  const key = getApiKey();
+  if (key) {
+    config.params = { ...config.params, key };
+  }
+  return config;
 });
 
 export default apiClient;
@@ -26,7 +50,9 @@ export const analysisApi = {
   },
 
   getTaskStreamUrl() {
-    return '/api/v1/analysis/tasks/stream';
+    const key = getApiKey();
+    const baseUrl = '/api/v1/analysis/tasks/stream';
+    return key ? `${baseUrl}?key=${key}` : baseUrl;
   },
 };
 
@@ -45,6 +71,12 @@ export const hotspotApi = {
 
   getHistory(limit: number = 20) {
     return apiClient.get('/hotspot/history', { params: { limit } });
+  },
+
+  getStreamUrl() {
+    const key = getApiKey();
+    const baseUrl = '/api/v1/hotspot/stream';
+    return key ? `${baseUrl}?key=${key}` : baseUrl;
   },
 };
 

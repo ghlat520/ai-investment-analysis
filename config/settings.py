@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     screening: ScreeningSettings = Field(default_factory=ScreeningSettings)
 
+    # API 认证密钥（可选，设置后所有 API 请求需带 ?key=xxx）
+    api_key: Optional[str] = None
+
     # 全局
     log_level: str = "INFO"
     debug: bool = False

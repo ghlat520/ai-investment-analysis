@@ -21,7 +21,7 @@ export default function StockInput({ isRunning, onAnalyze }: StockInputProps) {
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
