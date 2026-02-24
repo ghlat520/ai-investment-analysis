@@ -9,6 +9,62 @@ interface ReportOverviewProps {
   createdAt?: string;
 }
 
+interface AgentInsight {
+  name: string;
+  score: number;
+  confidence: number;
+  weight: number;
+  description: string;
+}
+
+// 解析 reasoning 文本，提取各维度数据
+function parseReasoning(reasoning: string): {
+  agents: AgentInsight[];
+} {
+  const agents: AgentInsight[] = [];
+
+  // 解析各维度: - dimension_name(+score, 置信conf%, 权重weight%): description
+  const pattern = /-\s*(\w+)\(([+-]?\d+),\s*置信(\d+)%,\s*权重(\d+)%\):\s*(.+?)(?=\s*-\s*\w+\(|$)/g;
+  let match;
+  while ((match = pattern.exec(reasoning)) !== null) {
+    agents.push({
+      name: match[1],
+      score: parseInt(match[2]),
+      confidence: parseInt(match[3]),
+      weight: parseInt(match[4]),
+      description: match[5].trim(),
+    });
+  }
+
+  return { agents };
+}
+
+// 维度名称映射（英文 -> 中文）
+const dimensionNames: Record<string, string> = {
+  business_model: '商业模式',
+  competition: '竞争格局',
+  fundamentals: '基本面',
+  growth: '成长性',
+  valuation: '估值',
+  technical: '技术面',
+  sentiment: '情绪面',
+  market_regime: '市场状态',
+  news: '新闻舆情',
+  risk: '风险',
+  quality: '质量',
+  momentum: '动量',
+};
+
+// 获取得分对应的颜色类名
+function getScoreColorClass(score: number): string {
+  if (score >= 30) return 'text-[var(--color-bull)]';
+  if (score <= -30) return 'text-[var(--color-bear)]';
+  return 'text-[var(--color-warning)]';
+}
+
+// Tooltip 组件 - 暂未使用，保留备用
+// function InfoTooltip({ content }: { content: string }) { ... }
+
 function formatDate(dateStr?: string): string {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -74,9 +130,72 @@ export default function ReportOverview({ fusion, stockName, symbol, createdAt }:
               {/* Key Insights */}
               <div className="border-t border-white/5 pt-4">
                 <span className="label-uppercase">KEY INSIGHTS</span>
-                <p className="text-white text-sm leading-relaxed mt-1.5 whitespace-pre-wrap text-left">
-                  {fusion.reasoning || '暂无分析结论'}
-                </p>
+                {(() => {
+                  const { agents } = parseReasoning(fusion.reasoning || '');
+                  if (agents.length === 0) {
+                    return (
+                      <p className="text-white text-sm leading-relaxed mt-1.5">
+                        {fusion.reasoning || '暂无分析结论'}
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="mt-3">
+                      {/* 摘要头部 */}
+                      <div className="grid grid-cols-3 gap-3 mb-4">
+                        <div className="bg-[var(--bg-elevated)] rounded-lg p-3 text-center">
+                          <div className="text-xs text-[var(--text-muted)] mb-1">综合评分</div>
+                          <div className={`text-lg font-bold ${getScoreColorClass(fusion.final_score)}`}>
+                            {fusion.final_score > 0 ? '+' : ''}{fusion.final_score}
+                          </div>
+                        </div>
+                        <div className="bg-[var(--bg-elevated)] rounded-lg p-3 text-center">
+                          <div className="text-xs text-[var(--text-muted)] mb-1">信号数量</div>
+                          <div className="text-lg font-bold text-white">{agents.length}</div>
+                        </div>
+                        <div className="bg-[var(--bg-elevated)] rounded-lg p-3 text-center">
+                          <div className="text-xs text-[var(--text-muted)] mb-1">市场状态</div>
+                          <div className="text-sm font-medium text-[var(--color-cyan)]">
+                            {fusion.market_regime || '-'}
+                          </div>
+                        </div>
+                      </div>
+                      {/* 维度表格 */}
+                      <table className="key-insights-table">
+                        <thead>
+                          <tr>
+                            <th>维度</th>
+                            <th className="text-center">得分</th>
+                            <th className="text-center">置信度</th>
+                            <th className="text-center">权重</th>
+                            <th>分析</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {agents.map((agent, idx) => (
+                            <tr key={idx}>
+                              <td className="font-medium text-white">
+                                {dimensionNames[agent.name] || agent.name}
+                              </td>
+                              <td className={`text-center font-mono ${getScoreColorClass(agent.score)}`}>
+                                {agent.score > 0 ? '+' : ''}{agent.score}
+                              </td>
+                              <td className="text-center text-[var(--text-secondary)]">
+                                {agent.confidence}%
+                              </td>
+                              <td className="text-center text-[var(--text-secondary)]">
+                                {agent.weight}%
+                              </td>
+                              <td className="text-[var(--text-secondary)] text-xs max-w-xs">
+                                <span className="line-clamp-2">{agent.description || '-'}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

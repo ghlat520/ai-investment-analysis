@@ -451,3 +451,35 @@ body {
 .bg-elevated { background: var(--bg-elevated); }
 
 .border-accent { border-color: var(--border-accent); }
+
+/* ============ KEY INSIGHTS 表格样式 ============ */
+.key-insights-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.key-insights-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.key-insights-table td {
+  font-size: 13px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-dim);
+  vertical-align: middle;
+}
+
+.key-insights-table tr:hover td {
+  background: var(--bg-hover);
+}
+
+.key-insights-table tr:last-child td {
+  border-bottom: none;
+}

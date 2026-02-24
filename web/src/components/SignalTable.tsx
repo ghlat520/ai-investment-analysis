@@ -37,18 +37,22 @@ function ScoreBar({ score }: { score: number }) {
 }
 
 function ExpandedRow({ signal }: { signal: AgentSignal }) {
+  // 防御性编程：确保数组字段存在
+  const keyFactors = signal.key_factors ?? [];
+  const risks = signal.risks ?? [];
+
   return (
     <div className="px-4 py-3 bg-[var(--bg-elevated)]/50 border-t border-white/5 text-xs space-y-1.5">
-      {signal.key_factors.length > 0 && (
+      {keyFactors.length > 0 && (
         <div className="flex gap-2">
           <span className="text-[var(--text-muted)] shrink-0">关键因素:</span>
-          <span className="text-[var(--text-secondary)]">{signal.key_factors.join(' · ')}</span>
+          <span className="text-[var(--text-secondary)]">{keyFactors.join(' · ')}</span>
         </div>
       )}
-      {signal.risks.length > 0 && (
+      {risks.length > 0 && (
         <div className="flex gap-2">
           <span className="text-[var(--text-muted)] shrink-0">风险提示:</span>
-          <span className="text-[var(--text-secondary)]">{signal.risks.slice(0, 3).join(' · ')}</span>
+          <span className="text-[var(--text-secondary)]">{risks.slice(0, 3).join(' · ')}</span>
         </div>
       )}
       {signal.reasoning && (

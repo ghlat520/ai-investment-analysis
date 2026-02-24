@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { TaskInfo, SSEAgentCompletedEvent } from '../types';
+import { analysisApi } from '../api/client';
 
 export interface UseTaskStreamOptions {
   onTaskCreated?: (task: TaskInfo) => void;
@@ -21,7 +22,9 @@ export function useTaskStream(options: UseTaskStreamOptions) {
       eventSourceRef.current.close();
     }
 
-    const es = new EventSource('/api/v1/analysis/tasks/stream');
+    // 使用带 API key 的完整 URL
+    const streamUrl = analysisApi.getTaskStreamUrl();
+    const es = new EventSource(streamUrl);
     eventSourceRef.current = es;
 
     es.addEventListener('connected', () => {
