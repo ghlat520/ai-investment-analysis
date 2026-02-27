@@ -734,6 +734,11 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
             "pb": float(pb) if not np.isnan(pb) else None,
             "pe_percentile": pe_pct,
             "pb_percentile": pb_pct,
+            "profit_yoy": float(profit_yoy) if not np.isnan(profit_yoy) else None,
+            "forecast_profit_change": (
+                stock.info.get("performance_forecast", {}).get("change_pct")
+                if isinstance(stock.info.get("performance_forecast"), dict) else None
+            ),
             "valuation_history_days": val_days,
             "code_score": code_score,
             "llm_adjustment": llm_result["score_adjustment"],

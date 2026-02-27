@@ -489,9 +489,50 @@ def generate_report(state: dict[str, Any]) -> str:
     if valuation_signal and isinstance(valuation_signal.metadata, dict):
         vmeta = valuation_signal.metadata
 
+        # 估值分位异常提示（业绩大幅下滑导致PE被动升高）
+        pe_ttm = vmeta.get("pe_ttm")
+        pb_pct = vmeta.get("pb_percentile")
+        profit_yoy = vmeta.get("profit_yoy")
+        forecast_profit_change = vmeta.get("forecast_profit_change")  # 业绩预告利润变化
+
+        # 触发条件（任一满足）：
+        # 1. 历史利润同比下滑超过30%
+        # 2. PE > 100 且历史利润下滑
+        # 3. 业绩预告利润下滑超过30%（前瞻数据，优先级更高）
+        show_pe_warning = False
+        warning_reason = ""
+        effective_profit_change = None  # 用于显示的实际利润变化
+
+        # 优先使用业绩预告数据（前瞻）
+        if forecast_profit_change is not None and forecast_profit_change < -30:
+            show_pe_warning = True
+            warning_reason = "业绩预告"
+            effective_profit_change = forecast_profit_change
+        elif profit_yoy is not None:
+            if profit_yoy < -30:
+                show_pe_warning = True
+                warning_reason = "历史数据"
+                effective_profit_change = profit_yoy
+            elif pe_ttm is not None and pe_ttm > 100 and profit_yoy < 0:
+                show_pe_warning = True
+                warning_reason = "历史数据"
+                effective_profit_change = profit_yoy
+
+        if show_pe_warning:
+            lines.append("## 估值深度分析")
+            lines.append("")
+            lines.append("> ⚠️ **估值分位异常提示**")
+            lines.append(">")
+            lines.append(f"> 当前PE处于历史高位，但需注意：由于{warning_reason}显示净利润同比下滑 **{abs(effective_profit_change):.1f}%**，")
+            lines.append("> PE升高可能主要来自EPS骤降（分母效应），而非市场给予更高估值。")
+            pb_hint = f"当前{pb_pct*100:.0f}%分位" if pb_pct is not None else "（数据缺失）"
+            lines.append(f"> 建议结合 **PB分位（{pb_hint}）** 进行综合判断。")
+            lines.append("")
+
         model_sel = vmeta.get("model_selection")
         if model_sel and isinstance(model_sel, dict):
-            lines.append("## 估值深度分析")
+            if not show_pe_warning:  # 避免重复添加标题
+                lines.append("## 估值深度分析")
             lines.append("")
             lines.append("### 估值模型选择")
             lines.append("")
