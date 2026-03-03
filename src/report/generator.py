@@ -146,6 +146,9 @@ _AGENT_DISPLAY = {
     "business_model": "商业模式",
     "industry": "行业",
     "supply_chain": "产业链",
+    "competition": "竞争格局",
+    "management": "管理层",
+    "esg": "ESG",
 }
 
 
@@ -247,6 +250,138 @@ def generate_report(state: dict[str, Any]) -> str:
         f"- **目标位**: {fusion.take_profit_pct:+.1f}%",
         "",
     ]
+
+    # === R9: 价值投资综合评估 ===
+    has_value_data = (
+        getattr(fusion, 'value_grade', '') or
+        getattr(fusion, 'quality_grade', '') or
+        getattr(fusion, 'margin_of_safety', 0) != 0
+    )
+    if has_value_data:
+        lines.append("## 价值投资评估")
+        lines.append("")
+
+        # 三层评级一览
+        lines.append("| 维度 | 评级 | 说明 |")
+        lines.append("|------|------|------|")
+        if fusion.value_grade:
+            lines.append(f"| 估值等级 | **{fusion.value_grade}** | 综合PE/PB分位+安全边际+EV/EBITDA |")
+        if fusion.quality_grade:
+            lines.append(f"| 企业质量 | **{fusion.quality_grade}** ({fusion.quality_score}/100) | 基本面综合评分 |")
+        if fusion.piotroski_f_score:
+            lines.append(f"| Piotroski F-Score | **{fusion.piotroski_f_score}/9** | 财务健康9维评分 |")
+        if fusion.moat_grade:
+            lines.append(f"| 护城河宽度 | **{fusion.moat_grade}** | 竞争壁垒持久性 |")
+        if fusion.margin_of_safety:
+            mos_pct = fusion.margin_of_safety * 100
+            mos_verdict = "安全买入" if mos_pct >= 30 else "关注区间" if mos_pct >= 15 else "不足" if mos_pct >= 0 else "高估"
+            lines.append(f"| 安全边际 | **{mos_pct:.1f}%** | {mos_verdict} |")
+        if fusion.timing_signal:
+            lines.append(f"| 择时信号 | **{fusion.timing_signal}** | 基于技术面/资金/情绪 |")
+        lines.append("")
+
+        # 内在价值区间
+        if fusion.intrinsic_value_range:
+            iv = fusion.intrinsic_value_range
+            lines.append("### 内在价值估算")
+            lines.append("")
+            low = iv.get("low", 0)
+            base = iv.get("base", 0)
+            high = iv.get("high", 0)
+            if any(v > 0 for v in [low, base, high]):
+                lines.append(f"- **保守估值**: {low:.2f}元")
+                lines.append(f"- **中性估值**: {base:.2f}元")
+                lines.append(f"- **乐观估值**: {high:.2f}元")
+                lines.append("")
+
+        # 价值投资结论
+        lines.append("### 价值投资结论")
+        lines.append("")
+        if fusion.value_grade in ("A+", "A") and fusion.quality_grade in ("优秀", "良好"):
+            if fusion.margin_of_safety and fusion.margin_of_safety >= 0.20:
+                lines.append(f"> **值得买入**: 估值{fusion.value_grade}级 + {fusion.quality_grade}企业质量 + {fusion.margin_of_safety*100:.0f}%安全边际。建议关注择时信号({fusion.timing_signal})选择入场时机。")
+            else:
+                lines.append(f"> **优质但等待**: 估值{fusion.value_grade}级 + {fusion.quality_grade}企业质量，但安全边际不足({fusion.margin_of_safety*100:.0f}%)。建议耐心等待更好的价格。")
+        elif fusion.quality_grade in ("优秀", "良好"):
+            lines.append(f"> **好公司但贵**: {fusion.quality_grade}企业质量，但估值等级{fusion.value_grade}，安全边际{fusion.margin_of_safety*100:.0f}%。持有者可继续持有，新进者建议等待回调。")
+        elif fusion.value_grade in ("A+", "A", "B+"):
+            lines.append(f"> **便宜但需审慎**: 估值{fusion.value_grade}级有吸引力，但企业质量{fusion.quality_grade}。需要深入研究基本面是否有改善趋势。")
+        else:
+            lines.append(f"> 估值等级{fusion.value_grade}，企业质量{fusion.quality_grade}，安全边际{fusion.margin_of_safety*100:.0f}%。综合评分{fusion.final_score:+d}，建议{fusion.final_action}。")
+        lines.append("")
+
+    # 基本面价值投资指标详情
+    fundamental_signal = next((s for s in signals if s.agent_name == "fundamental"), None)
+    if fundamental_signal and isinstance(fundamental_signal.metadata, dict):
+        vm = fundamental_signal.metadata.get("value_metrics", {})
+        if vm:
+            lines.append("### 企业质量评级详情")
+            lines.append("")
+            lines.append("| 指标 | 值 | 评价 |")
+            lines.append("|------|-----|------|")
+            if vm.get("roic") is not None:
+                roic = vm["roic"]
+                grade = "优秀" if roic > 20 else "良好" if roic > 12 else "一般" if roic > 6 else "较差"
+                lines.append(f"| ROIC | {roic:.1f}% | {grade} |")
+            if vm.get("piotroski_f_score") is not None:
+                f_score = vm["piotroski_f_score"]
+                grade = "极度健康" if f_score >= 8 else "健康" if f_score >= 6 else "一般" if f_score >= 4 else "偏弱"
+                lines.append(f"| Piotroski F-Score | {f_score}/9 | {grade} |")
+            if vm.get("altman_z_score") is not None:
+                z = vm["altman_z_score"]
+                grade = "安全" if z > 2.99 else "灰色区" if z > 1.81 else "危险"
+                lines.append(f"| Altman Z-Score | {z:.2f} | {grade} |")
+            if vm.get("owner_earnings") is not None:
+                oe = vm["owner_earnings"]
+                lines.append(f"| Owner Earnings | {oe:.1f}亿 | {'正向' if oe > 0 else '烧钱'} |")
+            if vm.get("fcf_yield") is not None:
+                fy = vm["fcf_yield"]
+                grade = "极高" if fy > 8 else "高" if fy > 5 else "合理" if fy > 2 else "偏低"
+                lines.append(f"| FCF Yield | {fy:.1f}% | {grade} |")
+            dupont = vm.get("dupont", {})
+            if dupont.get("net_margin") is not None:
+                lines.append(f"| 杜邦-净利率 | {dupont['net_margin']:.1f}% | - |")
+            if dupont.get("asset_turnover") is not None:
+                lines.append(f"| 杜邦-资产周转 | {dupont['asset_turnover']:.2f} | - |")
+            if dupont.get("equity_multiplier") is not None:
+                em = dupont["equity_multiplier"]
+                grade = "低杠杆" if em < 2 else "适中" if em < 3 else "高杠杆"
+                lines.append(f"| 杜邦-权益乘数 | {em:.1f} | {grade} |")
+            lines.append("")
+
+    # 估值方法详情
+    valuation_signal = next((s for s in signals if s.agent_name == "valuation"), None)
+    if valuation_signal and isinstance(valuation_signal.metadata, dict):
+        vvm = valuation_signal.metadata.get("value_metrics", {})
+        if vvm:
+            lines.append("### 内在价值估算详情")
+            lines.append("")
+            # DCF
+            dcf = vvm.get("dcf", {})
+            if dcf:
+                lines.append(f"**DCF两阶段模型**: 内在价值 **{dcf.get('intrinsic_per_share', 0):.2f}元/股**")
+                assumptions = dcf.get("assumptions", {})
+                if assumptions:
+                    lines.append(f"  - 基础FCF: {assumptions.get('base_fcf', 0)}亿")
+                    lines.append(f"  - 增长率: {assumptions.get('growth_rate', 0)}%")
+                    lines.append(f"  - 折现率: {assumptions.get('discount_rate', 0)}%")
+                    lines.append(f"  - 永续增长: {assumptions.get('terminal_growth', 0)}%")
+                lines.append("")
+            # Graham Number
+            gn = vvm.get("graham_number", {})
+            if gn:
+                lines.append(f"**格雷厄姆安全价**: **{gn.get('graham_number', 0):.2f}元** (EPS={gn.get('eps_used', 0)}, BVPS={gn.get('bvps_used', 0)})")
+                lines.append("")
+            # PB-ROE
+            pbroe = vvm.get("pb_roe", {})
+            if pbroe:
+                lines.append(f"**PB-ROE均衡**: 合理PB={pbroe.get('fair_pb', 0):.2f}, 当前PB={pbroe.get('current_pb', 0):.2f}, {pbroe.get('verdict', '')}")
+                lines.append("")
+            # EV/EBITDA
+            ev_ebitda = vvm.get("ev_ebitda", {})
+            if ev_ebitda and ev_ebitda.get("ev_ebitda"):
+                lines.append(f"**EV/EBITDA**: {ev_ebitda['ev_ebitda']:.1f} (EV={ev_ebitda.get('ev', 0):.0f}亿)")
+                lines.append("")
 
     # P2: 不确定性表达
     if hasattr(fusion, 'score_range_low') and hasattr(fusion, 'score_range_high'):

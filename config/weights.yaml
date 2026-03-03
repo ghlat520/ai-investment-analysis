@@ -45,8 +45,52 @@ market_regimes:
     management: 0.12
     esg: 0.11  # P3新增：ESG作为长期价值评估维度
 
+  # R3: 价值投资权重方案
+  value_investing:
+    # 第一梯队：价值投资核心（代码主导，高可靠性）
+    fundamental: 0.18     # 盈利能力、财务健康是基石
+    valuation: 0.18       # 估值是否合理是价值投资的灵魂
+    moat: 0.15            # 持续竞争优势（巴菲特第一原则）
+
+    # 第二梯队：企业质量评估（LLM+代码锚点）
+    business_model: 0.12  # 理解赚钱逻辑
+    management: 0.08      # 管理层重要但LLM评估信噪比有限
+    industry: 0.08        # 行业格局影响长期价值
+
+    # 第三梯队：辅助维度
+    competition: 0.06     # 可与moat互补
+    supply_chain: 0.04    # 供应链作为风险因子
+    esg: 0.04             # ESG作为长期风险因子
+
+    # 第四梯队：择时参考（不影响"是否值得买"，仅影响"何时买"）
+    sentiment: 0.03       # 可作为逆向指标
+    technical: 0.02       # 仅帮助择时
+    money_flow: 0.02      # 仅帮助择时
+
 # 默认权重
-default: neutral
+default: value_investing
+
+# R3: 融合比例配置（代码/LLM权重）
+fusion_ratios:
+  # 量化优先Agent: 代码计算可靠，LLM仅微调
+  code_dominant:
+    agents: [fundamental, valuation, technical, money_flow]
+    code_weight: 0.7
+    llm_weight: 0.3
+
+  # 定性为主Agent: LLM提供主要判断
+  llm_dominant:
+    agents: [moat, business_model, industry, supply_chain, competition, management, esg, sentiment]
+    code_weight: 0.3
+    llm_weight: 0.7
+
+  # 融合辩论层
+  fusion:
+    code_weight: 0.5
+    llm_weight: 0.5
+
+# 择时因子列表（不影响价值判断，仅影响timing_signal）
+timing_agents: [technical, money_flow, sentiment]
 
 # 硬性否决规则
 veto_rules:

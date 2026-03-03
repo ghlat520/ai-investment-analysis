@@ -448,6 +448,25 @@ def collect_stock_data(
         except Exception as e:
             logger.warning(f"[采集] 研报解析失败（非致命）: {e}")
 
+    # 提取 market_cap 和 total_shares（多Agent需要，优先从财务数据获取）
+    _market_cap = None  # 单位：元
+    if financial_data:
+        for rec in reversed(financial_data):
+            mc = rec.get("total_market_cap")
+            if mc is not None:
+                try:
+                    mc_val = float(mc)
+                    if mc_val > 0:
+                        _market_cap = mc_val * 1e8  # 亿→元
+                        break
+                except (TypeError, ValueError):
+                    pass
+    _total_shares = None  # 单位：股
+    if _market_cap and quotes_data:
+        last_close = float(quotes_data[-1].get("close", 0) or 0)
+        if last_close > 0:
+            _total_shares = _market_cap / last_close
+
     return StockData(
         symbol=symbol,
         name=stock_name,
@@ -473,6 +492,8 @@ def collect_stock_data(
             "performance_forecast": performance_forecast,
             "industry": industry_name,
             "industry_peers": industry_peers,
+            "market_cap": _market_cap,
+            "total_shares": _total_shares,
         },
     )
 

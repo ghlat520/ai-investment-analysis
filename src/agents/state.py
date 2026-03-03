@@ -60,6 +60,16 @@ class FusionDecision:
     key_uncertainties: tuple[str, ...] = ()  # 关键不确定性因素
     verification_points: tuple[dict[str, Any], ...] = ()  # 验证时点及指标
 
+    # R3: 价值投资三层输出
+    intrinsic_value_range: dict[str, float] = field(default_factory=dict)  # {low, base, high}
+    margin_of_safety: float = 0.0  # 综合安全边际
+    value_grade: str = ""  # A+ ~ F
+    quality_score: int = 0  # 企业质量 0-100
+    quality_grade: str = ""  # 优秀/良好/一般/较差/危险
+    piotroski_f_score: int = 0  # 0-9
+    moat_grade: str = ""  # 宽/窄/无
+    timing_signal: str = ""  # 基于 technical/money_flow/sentiment
+
 
 @dataclass
 class StockData:

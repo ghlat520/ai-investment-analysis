@@ -118,6 +118,126 @@ def _calc_moat_anchor(stock: StockData) -> tuple[int, str]:
     return anchor, explanation
 
 
+def _calc_moat_width(stock: StockData) -> dict:
+    """R10: 护城河宽度量化指标
+
+    返回量化的护城河宽度评估:
+    - brand_premium: 品牌溢价指标（毛利率 vs 行业中位数）
+    - scale_effect: 规模效应指标（营收增长 vs 成本增长比率）
+    - moat_trend: 护城河变化趋势（近3-5年关键指标变化方向）
+    - moat_width_score: 综合护城河宽度评分 (-30 ~ +30)
+    """
+    result = {
+        "brand_premium": None,
+        "scale_effect": None,
+        "moat_trend": None,
+        "moat_width_score": 0,
+        "details": [],
+    }
+
+    if not stock.financial_data:
+        return result
+
+    df = pd.DataFrame(stock.financial_data)
+    if "report_date" in df.columns:
+        df["report_date"] = pd.to_datetime(df["report_date"])
+        df = df.sort_values("report_date")
+
+    info = stock.info or {}
+    width_score = 0
+    details = []
+
+    # 1. 品牌溢价: 毛利率 vs 行业
+    if "gross_margin" in df.columns:
+        gm = pd.to_numeric(df["gross_margin"], errors="coerce").dropna()
+        if len(gm) >= 2:
+            gm_avg = float(gm.tail(4).mean())
+            # 尝试获取行业中位数
+            peers = info.get("industry_peers", [])
+            peer_gm = [float(p.get("gross_margin", 0) or 0) for p in peers if p.get("gross_margin")]
+            if peer_gm:
+                industry_median_gm = sorted(peer_gm)[len(peer_gm) // 2]
+                premium = gm_avg - industry_median_gm
+                result["brand_premium"] = {
+                    "company_gm": round(gm_avg, 1),
+                    "industry_median_gm": round(industry_median_gm, 1),
+                    "premium": round(premium, 1),
+                }
+                if premium > 15:
+                    width_score += 10
+                    details.append(f"品牌溢价强(毛利率{gm_avg:.1f}%>行业{industry_median_gm:.1f}%+15pp)")
+                elif premium > 5:
+                    width_score += 5
+                    details.append(f"品牌溢价中等(毛利率超行业{premium:.1f}pp)")
+                elif premium < -5:
+                    width_score -= 5
+                    details.append(f"毛利率低于行业{abs(premium):.1f}pp")
+
+    # 2. 规模效应: 营收增速 vs 成本增速
+    if "revenue" in df.columns and len(df) >= 3:
+        rev = pd.to_numeric(df["revenue"], errors="coerce").dropna()
+        if len(rev) >= 3:
+            rev_cagr = (rev.iloc[-1] / rev.iloc[-3]) ** (1 / 2) - 1 if rev.iloc[-3] > 0 else 0
+            # 检查成本是否增长更慢
+            if "gross_margin" in df.columns:
+                gm_series = pd.to_numeric(df["gross_margin"], errors="coerce").dropna()
+                if len(gm_series) >= 3:
+                    gm_improvement = gm_series.iloc[-1] - gm_series.iloc[-3]
+                    result["scale_effect"] = {
+                        "revenue_cagr_2y": round(rev_cagr * 100, 1),
+                        "gm_improvement_2y": round(gm_improvement, 1),
+                    }
+                    if rev_cagr > 0.1 and gm_improvement > 1:
+                        width_score += 8
+                        details.append(f"规模效应显现(营收CAGR {rev_cagr*100:.0f}%，毛利率提升{gm_improvement:.1f}pp)")
+                    elif rev_cagr > 0 and gm_improvement > 0:
+                        width_score += 3
+                        details.append("轻微规模效应")
+
+    # 3. 护城河变化趋势（近3-5年）
+    if len(df) >= 4:
+        trend_indicators = {}
+
+        # 毛利率趋势
+        if "gross_margin" in df.columns:
+            gm = pd.to_numeric(df["gross_margin"], errors="coerce").dropna()
+            if len(gm) >= 4:
+                early = gm.head(len(gm) // 2).mean()
+                late = gm.tail(len(gm) // 2).mean()
+                trend_indicators["gross_margin"] = "上升" if late > early + 1 else "下降" if late < early - 1 else "稳定"
+
+        # ROE趋势
+        if "roe" in df.columns:
+            roe = pd.to_numeric(df["roe"], errors="coerce").dropna()
+            if len(roe) >= 4:
+                early = roe.head(len(roe) // 2).mean()
+                late = roe.tail(len(roe) // 2).mean()
+                trend_indicators["roe"] = "上升" if late > early + 1 else "下降" if late < early - 1 else "稳定"
+
+        # 净利率趋势
+        if "net_margin" in df.columns:
+            nm = pd.to_numeric(df["net_margin"], errors="coerce").dropna()
+            if len(nm) >= 4:
+                early = nm.head(len(nm) // 2).mean()
+                late = nm.tail(len(nm) // 2).mean()
+                trend_indicators["net_margin"] = "上升" if late > early + 1 else "下降" if late < early - 1 else "稳定"
+
+        result["moat_trend"] = trend_indicators
+        # 趋势评分
+        improving = sum(1 for v in trend_indicators.values() if v == "上升")
+        declining = sum(1 for v in trend_indicators.values() if v == "下降")
+        if improving >= 2 and declining == 0:
+            width_score += 8
+            details.append("护城河趋势加宽(关键指标均上升)")
+        elif declining >= 2:
+            width_score -= 8
+            details.append("护城河趋势收窄(关键指标在下降)")
+
+    result["moat_width_score"] = max(-30, min(30, width_score))
+    result["details"] = details
+    return result
+
+
 def _build_moat_context(stock: StockData) -> str:
     """构建护城河分析的基础数据上下文"""
     lines = []
@@ -190,6 +310,13 @@ def analyze_moat(stock: StockData) -> AgentSignal:
     moat_context = _build_moat_context(stock)
     anchor_score, anchor_explanation = _calc_moat_anchor(stock)
 
+    # R10: 护城河宽度量化
+    moat_width = _calc_moat_width(stock)
+    moat_width_score = moat_width.get("moat_width_score", 0)
+
+    # 护城河宽度影响锚点（±15范围内）
+    anchor_score = max(-60, min(60, anchor_score + moat_width_score // 2))
+
     anchor_low = max(-100, anchor_score - 30)
     anchor_high = min(100, anchor_score + 30)
 
@@ -250,6 +377,8 @@ def analyze_moat(stock: StockData) -> AgentSignal:
             "anchor_explanation": anchor_explanation,
             "llm_raw_score": llm_result["score"],
             "raw_response": llm_result.get("raw_response", {}),
+            # R10: 护城河宽度量化
+            "moat_width": moat_width,
         },
         execution_time_ms=elapsed_ms,
     )

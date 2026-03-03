@@ -42,10 +42,72 @@ def _load_weights(regime: str = "neutral") -> dict[str, float]:
     if config_path.exists():
         with open(config_path) as f:
             config = yaml.safe_load(f)
+        # 默认使用value_investing权重
+        default_regime = config.get("default", "neutral")
         regimes = config.get("market_regimes", {})
         if regime in regimes:
             return regimes[regime]
+        if default_regime in regimes:
+            return regimes[default_regime]
     return DEFAULT_WEIGHTS
+
+
+def _load_fusion_config() -> dict:
+    """加载融合配置（融合比例、择时因子列表等）"""
+    config_path = Path(__file__).parent.parent.parent.parent / "config" / "weights.yaml"
+    if config_path.exists():
+        with open(config_path) as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def _get_fusion_ratio(agent_name: str, fusion_config: dict) -> tuple[float, float]:
+    """获取某Agent的code/LLM融合比例
+
+    Returns:
+        (code_weight, llm_weight)
+    """
+    ratios = fusion_config.get("fusion_ratios", {})
+
+    # 检查code_dominant列表
+    code_dom = ratios.get("code_dominant", {})
+    if agent_name in code_dom.get("agents", []):
+        return code_dom.get("code_weight", 0.7), code_dom.get("llm_weight", 0.3)
+
+    # 检查llm_dominant列表
+    llm_dom = ratios.get("llm_dominant", {})
+    if agent_name in llm_dom.get("agents", []):
+        return llm_dom.get("code_weight", 0.3), llm_dom.get("llm_weight", 0.7)
+
+    # 默认平衡
+    return 0.5, 0.5
+
+
+def _calc_timing_signal(signals: list[AgentSignal], timing_agents: list[str]) -> str:
+    """从择时因子计算择时信号
+
+    择时因子（technical, money_flow, sentiment）不影响"是否值得买"，
+    仅影响"何时买"。
+    """
+    timing_scores = []
+    for s in signals:
+        if s.agent_name in timing_agents:
+            timing_scores.append(s.signal_score)
+
+    if not timing_scores:
+        return "中性"
+
+    avg = sum(timing_scores) / len(timing_scores)
+    if avg >= 30:
+        return "积极买入"
+    elif avg >= 10:
+        return "偏多"
+    elif avg >= -10:
+        return "中性"
+    elif avg >= -30:
+        return "偏空(等待)"
+    else:
+        return "极度悲观(逆向买入机会)"  # 价值投资逆向逻辑
 
 
 def _normalize_weights(
@@ -504,12 +566,18 @@ def fuse_signals(
     # Step 5: LLM辩论式融合（可选）
     llm_result = _llm_debate_fusion(signals, stock, code_score, code_reasoning, conflicts)
 
+    # R3: 使用分场景融合比例
+    fusion_config = _load_fusion_config()
+    fusion_ratio = fusion_config.get("fusion_ratios", {}).get("fusion", {})
+    fusion_code_w = fusion_ratio.get("code_weight", 0.5)
+    fusion_llm_w = fusion_ratio.get("llm_weight", 0.5)
+
     # 最终得分计算
     if llm_result["enhanced"]:
-        # LLM可用：以LLM辩论结论为主(0.7) + code为辅(0.3)
         llm_adjusted_score = code_score + llm_result["score_adjustment"]
         llm_adjusted_score = max(-100, min(100, llm_adjusted_score))
-        final_score = int(0.3 * code_score + 0.7 * llm_adjusted_score)
+        # R3: 融合层使用可配置比例（默认0.5/0.5）
+        final_score = int(fusion_code_w * code_score + fusion_llm_w * llm_adjusted_score)
         final_score = max(-100, min(100, final_score))
         confidence = min(1.0, confidence + 0.05)
     else:
@@ -578,10 +646,128 @@ def fuse_signals(
             if raw.get("verification_points"):
                 verification_points = list(raw["verification_points"])[:4]
 
+    # === R3: 价值投资三层输出 ===
+    timing_agents = fusion_config.get("timing_agents", ["technical", "money_flow", "sentiment"])
+
+    # Layer 1: 内在价值判断
+    intrinsic_value_range = {}
+    margin_of_safety_val = 0.0
+    value_grade = "N/A"
+
+    valuation_signal = next((s for s in signals if s.agent_name == "valuation"), None)
+    if valuation_signal and isinstance(valuation_signal.metadata, dict):
+        vmeta = valuation_signal.metadata
+
+        # --- 内在价值区间智能构建（三级优先级） ---
+
+        # 优先级1: YAML目标价折现（最准确，分业务线精算）
+        _tp = vmeta.get("target_prices", {})
+        _tp_conservative = _tp.get("conservative", 0) if isinstance(_tp, dict) else 0
+        _tp_base = _tp.get("base", 0) if isinstance(_tp, dict) else 0
+        _tp_optimistic = _tp.get("optimistic", 0) if isinstance(_tp, dict) else 0
+
+        if _tp_conservative and _tp_conservative > 0:
+            # 目标价按年折现到当前（折现率10%，对应1/2/3年）
+            intrinsic_value_range = {
+                "low": round(_tp_conservative / 1.10, 2),
+                "base": round(_tp_base / (1.10 ** 2), 2) if _tp_base > 0 else round(_tp_conservative / 1.10, 2),
+                "high": round(_tp_optimistic / (1.10 ** 3), 2) if _tp_optimistic > 0 else round(_tp_base / (1.10 ** 2), 2) if _tp_base > 0 else round(_tp_conservative / 1.10, 2),
+            }
+
+        # 优先级2: 过滤不适用方法后构建区间
+        if not intrinsic_value_range:
+            iv = vmeta.get("intrinsic_value", {})
+            if iv:
+                # 获取profit_yoy判断是否成长股
+                _profit_yoy = vmeta.get("profit_yoy")
+                _is_growth_stock = _profit_yoy is not None and _profit_yoy > 20
+
+                iv_filtered = {}
+                for method, val in iv.items():
+                    if not isinstance(val, (int, float)) or val <= 0:
+                        continue
+                    # 成长股排除Graham Number（对高增长股严重低估）
+                    if _is_growth_stock and method == "graham_number":
+                        continue
+                    iv_filtered[method] = val
+
+                if iv_filtered:
+                    iv_values = list(iv_filtered.values())
+                    intrinsic_value_range = {
+                        "low": min(iv_values),
+                        "base": sum(iv_values) / len(iv_values),
+                        "high": max(iv_values),
+                    }
+
+        # 优先级3: 原逻辑兜底（所有方法）
+        if not intrinsic_value_range:
+            iv = vmeta.get("intrinsic_value", {})
+            if iv:
+                iv_values = [v for v in iv.values() if isinstance(v, (int, float)) and v > 0]
+                if iv_values:
+                    intrinsic_value_range = {
+                        "low": min(iv_values),
+                        "base": sum(iv_values) / len(iv_values),
+                        "high": max(iv_values),
+                    }
+        # 安全边际
+        mos_data = vmeta.get("margin_of_safety", {})
+        if mos_data:
+            mos_values = [
+                d.get("margin_of_safety", 0) for d in mos_data.values()
+                if isinstance(d, dict) and "margin_of_safety" in d
+            ]
+            if mos_values:
+                margin_of_safety_val = round(sum(mos_values) / len(mos_values), 4)
+
+        value_grade = vmeta.get("valuation_grade", "N/A")
+
+    # Layer 2: 企业质量评级
+    quality_score = 0
+    quality_grade = "N/A"
+    piotroski_val = 0
+    moat_grade_val = ""
+
+    fundamental_signal = next((s for s in signals if s.agent_name == "fundamental"), None)
+    if fundamental_signal and isinstance(fundamental_signal.metadata, dict):
+        fmeta = fundamental_signal.metadata
+        vm = fmeta.get("value_metrics", {})
+        piotroski_val = vm.get("piotroski_f_score", 0)
+
+        # 质量评分: 基于fundamental score + piotroski + moat
+        quality_score = max(0, min(100, int((fundamental_signal.signal_score + 100) / 2)))
+
+    moat_signal = next((s for s in signals if s.agent_name == "moat"), None)
+    if moat_signal:
+        if moat_signal.signal_score >= 40:
+            moat_grade_val = "宽"
+        elif moat_signal.signal_score >= 10:
+            moat_grade_val = "窄"
+        else:
+            moat_grade_val = "无"
+        # 护城河影响质量评分
+        quality_score = max(0, min(100, quality_score + moat_signal.signal_score // 5))
+
+    if quality_score >= 80:
+        quality_grade = "优秀"
+    elif quality_score >= 60:
+        quality_grade = "良好"
+    elif quality_score >= 40:
+        quality_grade = "一般"
+    elif quality_score >= 20:
+        quality_grade = "较差"
+    else:
+        quality_grade = "危险"
+
+    # Layer 3: 择时信号
+    timing_signal = _calc_timing_signal(signals, timing_agents)
+
     elapsed_ms = int((time.time() - start) * 1000)
     logger.info(
         f"[Fusion] 完成: score={final_score:+d}[{score_range_low:+d}~{score_range_high:+d}] "
         f"action={final_action} confidence={confidence:.0%} position={position_pct}% "
+        f"value_grade={value_grade} quality={quality_score}({quality_grade}) moat={moat_grade_val} "
+        f"mos={margin_of_safety_val:.0%} timing={timing_signal} "
         f"bull={len(bullish)} bear={len(bearish)} neutral={len(neutral_signals)} "
         f"uncertainties={len(key_uncertainties)} llm={'Y' if llm_result['enhanced'] else 'N'} {elapsed_ms}ms"
     )
@@ -611,4 +797,13 @@ def fuse_signals(
         score_range_high=score_range_high,
         key_uncertainties=tuple(key_uncertainties),
         verification_points=tuple(verification_points),
+        # R3: 价值投资三层输出
+        intrinsic_value_range=intrinsic_value_range,
+        margin_of_safety=margin_of_safety_val,
+        value_grade=value_grade,
+        quality_score=quality_score,
+        quality_grade=quality_grade,
+        piotroski_f_score=piotroski_val,
+        moat_grade=moat_grade_val,
+        timing_signal=timing_signal,
     )

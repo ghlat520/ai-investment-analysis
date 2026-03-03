@@ -402,6 +402,265 @@ def _calc_auto_target_prices(
     }
 
 
+# ============================================================
+# 价值投资增强估值方法 (R2)
+# ============================================================
+
+
+def _safe_val(val, default=np.nan):
+    """安全提取数值"""
+    if val is None:
+        return default
+    try:
+        v = float(val)
+        return default if np.isnan(v) else v
+    except (TypeError, ValueError):
+        return default
+
+
+def _calc_dcf_value(
+    fcf_or_earnings: float,
+    growth_rate_high: float,
+    high_growth_years: int = 5,
+    terminal_growth: float = 0.03,
+    discount_rate: float = 0.10,
+    total_shares: float = 1.0,
+) -> dict:
+    """简化DCF (两阶段折现现金流) — 计算内在价值
+
+    Phase 1: 高增长期 (default 5年)
+    Phase 2: 永续增长 (default 3%)
+    折现率: default 10% (或WACC)
+
+    V = Σ[FCF_t / (1+r)^t] + Terminal_Value / (1+r)^n
+    """
+    if fcf_or_earnings <= 0 or total_shares <= 0:
+        return {}
+
+    # 限制增长率合理范围
+    growth_rate = max(-0.1, min(0.5, growth_rate_high))
+
+    # Phase 1: 高增长期
+    pv_phase1 = 0.0
+    fcf_t = fcf_or_earnings
+    for t in range(1, high_growth_years + 1):
+        fcf_t *= (1 + growth_rate)
+        pv_phase1 += fcf_t / (1 + discount_rate) ** t
+
+    # Phase 2: 终值 (Gordon Growth Model)
+    terminal_fcf = fcf_t * (1 + terminal_growth)
+    if discount_rate > terminal_growth:
+        terminal_value = terminal_fcf / (discount_rate - terminal_growth)
+    else:
+        terminal_value = terminal_fcf * 20  # 安全上限
+
+    pv_terminal = terminal_value / (1 + discount_rate) ** high_growth_years
+
+    # 总内在价值
+    intrinsic_total = pv_phase1 + pv_terminal
+    intrinsic_per_share = intrinsic_total / total_shares
+
+    return {
+        "intrinsic_value_total": round(intrinsic_total / 1e8, 2),  # 亿
+        "intrinsic_per_share": round(intrinsic_per_share, 2),
+        "pv_phase1": round(pv_phase1 / 1e8, 2),
+        "pv_terminal": round(pv_terminal / 1e8, 2),
+        "assumptions": {
+            "base_fcf": round(fcf_or_earnings / 1e8, 2),
+            "growth_rate": round(growth_rate * 100, 1),
+            "terminal_growth": round(terminal_growth * 100, 1),
+            "discount_rate": round(discount_rate * 100, 1),
+            "high_growth_years": high_growth_years,
+        },
+    }
+
+
+def _calc_margin_of_safety(intrinsic_value: float, current_price: float) -> dict:
+    """计算安全边际
+
+    MoS = (intrinsic_value - current_price) / intrinsic_value
+    ≥ 30% → 安全买入区间
+    20-30% → 关注区间
+    < 20% → 不够安全
+    """
+    if intrinsic_value <= 0 or current_price <= 0:
+        return {}
+
+    mos = (intrinsic_value - current_price) / intrinsic_value
+    if mos >= 0.30:
+        grade = "安全买入"
+    elif mos >= 0.20:
+        grade = "关注区间"
+    elif mos >= 0.0:
+        grade = "安全边际不足"
+    else:
+        grade = "高估"
+
+    return {
+        "margin_of_safety": round(mos, 4),
+        "margin_of_safety_pct": round(mos * 100, 1),
+        "grade": grade,
+        "intrinsic_value": round(intrinsic_value, 2),
+        "current_price": round(current_price, 2),
+    }
+
+
+def _calc_graham_number(eps: float, bvps: float) -> dict:
+    """Graham Number — 格雷厄姆安全买入价
+
+    Graham Number = √(22.5 × EPS × BVPS)
+    适用于保守型价值投资筛选
+    """
+    if eps <= 0 or bvps <= 0:
+        return {}
+
+    gn = (22.5 * eps * bvps) ** 0.5
+    return {
+        "graham_number": round(gn, 2),
+        "eps_used": round(eps, 3),
+        "bvps_used": round(bvps, 3),
+    }
+
+
+def _score_ev_ebitda(stock: StockData, fin_df: pd.DataFrame) -> tuple[int, str, dict]:
+    """EV/EBITDA — 排除资本结构差异的估值指标
+
+    EV = 市值 + 有息负债 - 现金
+    EBITDA ≈ 营业利润 + 折旧摊销
+    """
+    meta = {}
+    if fin_df.empty:
+        return 0, "EV/EBITDA无数据", meta
+
+    latest = fin_df.iloc[-1]
+    info = stock.info or {}
+
+    market_cap = _safe_val(info.get("market_cap"))
+    net_profit = _safe_val(latest.get("net_profit"))
+    total_liabilities = _safe_val(latest.get("total_liabilities"))
+    # 近似: 有息负债 ≈ 总负债 × 0.4 (保守估计)
+    interest_bearing_debt = total_liabilities * 0.4 if not np.isnan(total_liabilities) else 0
+    cash = _safe_val(latest.get("cash_and_equivalents", latest.get("monetary_capital")), 0)
+
+    if np.isnan(market_cap) or market_cap <= 0:
+        return 0, "EV/EBITDA: 缺少市值数据", meta
+
+    ev = market_cap + interest_bearing_debt - cash
+    meta["ev"] = round(ev / 1e8, 2)
+
+    # EBITDA近似: 净利润 × 1.5 (粗略)
+    # 更好的近似: 如果有operating_profit和depreciation
+    operating_profit = _safe_val(latest.get("operating_profit"))
+    depreciation = _safe_val(latest.get("depreciation", latest.get("depreciation_amortization")), 0)
+
+    if not np.isnan(operating_profit):
+        ebitda = operating_profit + abs(depreciation)
+    elif not np.isnan(net_profit) and net_profit > 0:
+        ebitda = net_profit * 1.4  # 粗略近似
+    else:
+        return 0, "EV/EBITDA: 缺少利润数据", meta
+
+    if ebitda <= 0:
+        return -5, "EV/EBITDA: EBITDA为负(无法计算)", meta
+
+    ev_ebitda = ev / ebitda
+    meta["ev_ebitda"] = round(ev_ebitda, 1)
+    meta["ebitda"] = round(ebitda / 1e8, 2)
+
+    if ev_ebitda < 6:
+        return 8, f"EV/EBITDA={ev_ebitda:.1f}(极低估<6)", meta
+    elif ev_ebitda < 10:
+        return 4, f"EV/EBITDA={ev_ebitda:.1f}(低估<10)", meta
+    elif ev_ebitda < 15:
+        return 0, f"EV/EBITDA={ev_ebitda:.1f}(合理)", meta
+    elif ev_ebitda < 25:
+        return -5, f"EV/EBITDA={ev_ebitda:.1f}(偏高)", meta
+    else:
+        return -10, f"EV/EBITDA={ev_ebitda:.1f}(严重高估>25)", meta
+
+
+def _calc_pb_roe_fair_value(pb: float, roe: float, growth_rate: float = 0.05, discount_rate: float = 0.10) -> dict:
+    """PB-ROE 均衡估值模型
+
+    合理PB = (ROE - g) / (r - g)
+    对比当前PB，判断是否低估
+    """
+    if pb <= 0 or roe <= 0:
+        return {}
+
+    roe_decimal = roe / 100
+    # 当增长率≥折现率时，上调折现率以保证模型有效
+    if discount_rate <= growth_rate:
+        discount_rate = growth_rate + 0.02
+
+    fair_pb = (roe_decimal - growth_rate) / (discount_rate - growth_rate)
+    if fair_pb <= 0:
+        return {}
+
+    pb_premium = (pb / fair_pb - 1) * 100  # 正值=溢价, 负值=折价
+
+    return {
+        "fair_pb": round(fair_pb, 2),
+        "current_pb": round(pb, 2),
+        "pb_premium_pct": round(pb_premium, 1),
+        "verdict": "低估" if pb_premium < -20 else "合理" if pb_premium < 20 else "高估",
+    }
+
+
+def _calc_valuation_grade(pe_pct, pb_pct, composite_mos, ev_ebitda) -> str:
+    """计算综合估值等级 A+ ~ F"""
+    points = 0
+
+    if pe_pct is not None:
+        if pe_pct < 0.2:
+            points += 3
+        elif pe_pct < 0.4:
+            points += 2
+        elif pe_pct < 0.6:
+            points += 1
+        elif pe_pct > 0.8:
+            points -= 2
+
+    if pb_pct is not None:
+        if pb_pct < 0.2:
+            points += 2
+        elif pb_pct < 0.4:
+            points += 1
+        elif pb_pct > 0.8:
+            points -= 2
+
+    if composite_mos is not None:
+        if composite_mos >= 0.30:
+            points += 3
+        elif composite_mos >= 0.15:
+            points += 1
+        elif composite_mos < 0:
+            points -= 2
+
+    if ev_ebitda is not None:
+        if ev_ebitda < 8:
+            points += 2
+        elif ev_ebitda < 12:
+            points += 1
+        elif ev_ebitda > 20:
+            points -= 2
+
+    if points >= 8:
+        return "A+"
+    elif points >= 6:
+        return "A"
+    elif points >= 4:
+        return "B+"
+    elif points >= 2:
+        return "B"
+    elif points >= 0:
+        return "C"
+    elif points >= -2:
+        return "D"
+    else:
+        return "F"
+
+
 def _build_dividend_context(stock: StockData) -> str:
     """构建分红回报上下文供LLM阅读"""
     div = stock.info.get("dividend_history", [])
@@ -581,6 +840,114 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
     pe_pct = _calc_percentile(positive_pe, pe_ttm) if not np.isnan(pe_ttm) and pe_ttm > 0 and len(positive_pe) > 0 else None
     pb_pct = _calc_percentile(positive_pb, pb) if not np.isnan(pb) and pb > 0 and len(positive_pb) > 0 else None
 
+    # === 价值投资增强估值 (R2) ===
+    intrinsic_value_estimates = {}
+    margin_of_safety_data = {}
+    vi_valuation_meta = {}
+
+    # 当前价格
+    current_price = 0.0
+    if stock.daily_quotes:
+        last_quote = stock.daily_quotes[-1]
+        current_price = float(last_quote.get("close", 0) or 0)
+
+    # 获取关键财务数据
+    info = stock.info or {}
+    market_cap = _safe_val(info.get("market_cap"), 0)
+    total_shares_val = _safe_val(info.get("total_shares", info.get("shares_outstanding")), 0)
+    # 如果shares是亿为单位，转换
+    if total_shares_val > 0 and total_shares_val < 1000:
+        total_shares_val = total_shares_val * 1e8  # 假设是亿股
+
+    latest_fin = fin_df.iloc[-1] if not fin_df.empty else {}
+
+    # 1. EV/EBITDA
+    ev_ebitda_score, ev_ebitda_desc, ev_ebitda_meta = _score_ev_ebitda(stock, fin_df)
+    total_score += ev_ebitda_score
+    all_factors.append(ev_ebitda_desc)
+    vi_valuation_meta["ev_ebitda"] = ev_ebitda_meta
+
+    # 2. DCF估值
+    if not fin_df.empty:
+        ocf = _safe_val(latest_fin.get("operating_cashflow"))
+        capex = _safe_val(latest_fin.get("capital_expenditure", latest_fin.get("capex")), 0)
+        net_profit_val = _safe_val(latest_fin.get("net_profit"))
+
+        # FCF = OCF - |Capex|
+        fcf_for_dcf = ocf - abs(capex) if not np.isnan(ocf) else 0
+        if fcf_for_dcf <= 0 and not np.isnan(net_profit_val) and net_profit_val > 0:
+            fcf_for_dcf = net_profit_val * 0.7  # 用净利润70%近似
+
+        # 增长率: 用profit_yoy的中值，cap在30%（高增长期最高30%，避免DCF过于激进）
+        growth_for_dcf = min(profit_yoy / 100, 0.30) if not np.isnan(profit_yoy) and profit_yoy > 0 else 0.05
+
+        if fcf_for_dcf > 0 and total_shares_val > 0:
+            dcf_result = _calc_dcf_value(
+                fcf_or_earnings=fcf_for_dcf,
+                growth_rate_high=growth_for_dcf,
+                total_shares=total_shares_val,
+                discount_rate=0.12,        # A股风险溢价更高，10%→12%
+                terminal_growth=0.025,     # 永续增长审慎化，3%→2.5%
+            )
+            if dcf_result:
+                intrinsic_value_estimates["dcf"] = dcf_result["intrinsic_per_share"]
+                vi_valuation_meta["dcf"] = dcf_result
+
+                # DCF 安全边际
+                if current_price > 0:
+                    dcf_mos = _calc_margin_of_safety(dcf_result["intrinsic_per_share"], current_price)
+                    margin_of_safety_data["dcf"] = dcf_mos
+
+    # 3. Graham Number
+    if not fin_df.empty:
+        eps = _safe_val(latest_fin.get("eps"))
+        bvps = _safe_val(latest_fin.get("bps", latest_fin.get("book_value_per_share")))
+        if not np.isnan(eps) and not np.isnan(bvps) and eps > 0 and bvps > 0:
+            gn_result = _calc_graham_number(eps, bvps)
+            if gn_result:
+                intrinsic_value_estimates["graham_number"] = gn_result["graham_number"]
+                vi_valuation_meta["graham_number"] = gn_result
+
+                if current_price > 0:
+                    gn_mos = _calc_margin_of_safety(gn_result["graham_number"], current_price)
+                    margin_of_safety_data["graham"] = gn_mos
+
+    # 4. PB-ROE均衡估值
+    roe_val = _safe_val(latest_fin.get("roe")) if not fin_df.empty else np.nan
+    if not np.isnan(pb) and pb > 0 and not np.isnan(roe_val) and roe_val > 0:
+        growth_for_pb = profit_yoy / 100 if not np.isnan(profit_yoy) and profit_yoy > 0 else 0.05
+        pb_roe_result = _calc_pb_roe_fair_value(pb, roe_val, growth_for_pb)
+        if pb_roe_result:
+            vi_valuation_meta["pb_roe"] = pb_roe_result
+
+    # 5. 综合安全边际评分
+    mos_values = []
+    for key, mos_data in margin_of_safety_data.items():
+        if mos_data and "margin_of_safety" in mos_data:
+            mos_values.append(mos_data["margin_of_safety"])
+
+    composite_mos = np.mean(mos_values) if mos_values else None
+    if composite_mos is not None:
+        vi_valuation_meta["composite_margin_of_safety"] = round(composite_mos * 100, 1)
+        if composite_mos >= 0.30:
+            total_score += 10
+            all_factors.append(f"综合安全边际={composite_mos*100:.0f}%(≥30%，价值买入区)")
+        elif composite_mos >= 0.15:
+            total_score += 3
+            all_factors.append(f"综合安全边际={composite_mos*100:.0f}%(关注区)")
+        elif composite_mos >= 0:
+            all_factors.append(f"综合安全边际={composite_mos*100:.0f}%(安全边际不足)")
+        else:
+            total_score -= 5
+            all_factors.append(f"综合安全边际={composite_mos*100:.0f}%(当前高估)")
+
+    # 估值等级
+    valuation_grade = _calc_valuation_grade(pe_pct, pb_pct, composite_mos, ev_ebitda_meta.get("ev_ebitda"))
+    vi_valuation_meta["valuation_grade"] = valuation_grade
+
+    # 重新计算代码评分（包含增强指标）
+    code_score = max(-100, min(100, int(total_score * 100 / 70)))  # 满分调整到约70
+
     # 分业务线前瞻估值上下文
     segment_context, segment_result = _build_segment_forecast_context(stock)
 
@@ -747,7 +1114,13 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
                 "pe": pe_score,
                 "pb": pb_score,
                 "peg": peg_score,
+                "ev_ebitda": ev_ebitda_score,
             },
+            # 价值投资增强 (R2)
+            "intrinsic_value": intrinsic_value_estimates,
+            "margin_of_safety": margin_of_safety_data,
+            "valuation_grade": vi_valuation_meta.get("valuation_grade", "N/A"),
+            "value_metrics": vi_valuation_meta,
             # V2新增字段（从LLM raw_response提取）
             "raw_response": raw,
             "model_selection": raw.get("model_selection"),
