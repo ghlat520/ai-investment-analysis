@@ -796,7 +796,7 @@ def analyze_valuation(stock: StockData) -> AgentSignal:
 
     # PEG评分（使用近2-3年平均增速，减少单期波动）
     profit_yoy = np.nan
-    if not fin_df.empty:
+    if not fin_df.empty and "profit_yoy" in fin_df.columns:
         # 取最近几期年报的profit_yoy做平滑
         if "report_type" in fin_df.columns:
             annual = fin_df[fin_df["report_type"].astype(str).str.contains("年报", na=False)]
